@@ -823,9 +823,23 @@ class TRONGrid:
             'loop_efficiency': self.stats['loop_efficiency']
         })
 
+    def _fallback_calculation(self):
+        """Fallback calculation when no grid calculators exist"""
+        if not hasattr(self, '_fallback_fib_a'):
+            self._fallback_fib_a, self._fallback_fib_b = 0, 1
+
+        # Simple Fibonacci progression
+        self._fallback_fib_a, self._fallback_fib_b = self._fallback_fib_b, self._fallback_fib_a + self._fallback_fib_b
+
+        # Keep numbers manageable
+        if self._fallback_fib_b > 10**12:
+            self._fallback_fib_a, self._fallback_fib_b = 0, 1
+
+        return self._fallback_fib_b
+
     def evolve(self):
         # cell calculation logic
-        self.calculation_result = self._calculate_fibonacci_through_grid_modulo(modulo=100000000000000)
+        self.calculation_result = self._calculate_fibonacci_through_grid_modulo()
         self.loop_iterations += 1
 
         """Evolve grid with focus on maintaining calculation loop"""
@@ -1036,85 +1050,113 @@ class TRONGrid:
 
         self.update_stats()
 
-    def _calculate_fibonacci_through_grid_modulo(self, modulo=100000000000):
-        """Calculate Fibonacci with modulo to prevent overflow"""
-        # Find all MCP programs
-        total_contribution = 0
+    def _calculate_fibonacci_through_grid_modulo(self, modulo=100000000000000):
+        """Calculate Fibonacci with modulo using grid collaboration"""
 
-        for y in range(self.height):
-            for x in range(self.width):
-                cell = self.grid[y][x]
-                if cell.cell_type == CellType.MCP_PROGRAM:
-                    contribution = cell.energy
-                    # ... (add neighbor bonuses/penalties) ...
-                    total_contribution += contribution
+        # Use the same grid-based calculation
+        fib_result = self._calculate_fibonacci_through_grid()
 
-        # Use modulo Fibonacci to keep numbers small
-        if not hasattr(self, '_mod_fib_a'):
-            self._mod_fib_a, self._mod_fib_b = 0, 1
+        # Apply modulo to keep numbers manageable
+        return fib_result % modulo
 
-        # Advance based on grid contribution
-        advance_steps = int(total_contribution * 10) % 5 + 1
-
-        for _ in range(advance_steps):
-            self._mod_fib_a, self._mod_fib_b = self._mod_fib_b, (self._mod_fib_a + self._mod_fib_b) % modulo
-
-        return self._mod_fib_b
 
     def _calculate_fibonacci_through_grid(self):
-        """Calculate Fibonacci using only grid programs"""
-        # Find all MCP programs to act as "calculators"
+        """Calculate Fibonacci using the entire grid working together"""
+
+        # Total grid contribution starts at 0
+        total_contribution = 0
         calculator_programs = []
 
+        # First pass: find all MCP programs that are calculators
         for y in range(self.height):
             for x in range(self.width):
                 cell = self.grid[y][x]
                 if cell.cell_type == CellType.MCP_PROGRAM:
+                    # Check if marked as calculator or has high energy
+                    is_calculator = cell.metadata.get('is_calculator', False) if cell.metadata else False
+                    if is_calculator or cell.energy > 0.7:  # High-energy MCP programs contribute
+                        calculator_programs.append((x, y, cell))
+
+        # If no calculators, create some from high-energy cells
+        if not calculator_programs:
+            # Find cells that could become calculators
+            candidate_cells = []
+            for y in range(self.height):
+                for x in range(self.width):
+                    cell = self.grid[y][x]
+                    if cell.cell_type in [CellType.MCP_PROGRAM, CellType.SYSTEM_CORE]:
+                        if cell.energy > 0.6:
+                            candidate_cells.append((x, y, cell))
+
+            # Mark some as calculators
+            if candidate_cells:
+                for i in range(min(3, len(candidate_cells))):  # Mark up to 3
+                    x, y, cell = candidate_cells[i]
+                    if cell.metadata is None:
+                        cell.metadata = {}
+                    cell.metadata['is_calculator'] = True
+                    cell.metadata['calculation_power'] = cell.energy
                     calculator_programs.append((x, y, cell))
 
-        # If no calculators, use a fallback
-        if not calculator_programs:
-            # Simple fallback that still uses grid state
-            return self._fallback_calculation()
-
-        # Use MCP programs to calculate
-        # Each MCP program contributes to the calculation based on its energy
-        total_contribution = 0
-
+        # Calculate contribution from each calculator
         for x, y, cell in calculator_programs:
-            # Contribution based on program's energy and neighbors
+            # Base contribution from cell energy
             contribution = cell.energy
 
-            # Boost if near other MCP programs (collaborative calculation)
-            mcp_neighbors = self._count_neighbors(x, y, CellType.MCP_PROGRAM)
-            contribution *= (1.0 + mcp_neighbors * 0.1)
+            # Bonus for being near other calculators (collaboration)
+            nearby_calculators = 0
+            for dy in [-2, -1, 0, 1, 2]:
+                for dx in [-2, -1, 0, 1, 2]:
+                    if dx == 0 and dy == 0:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < self.width and 0 <= ny < self.height:
+                        neighbor = self.grid[ny][nx]
+                        if neighbor.cell_type == CellType.MCP_PROGRAM:
+                            if neighbor.metadata and neighbor.metadata.get('is_calculator', False):
+                                nearby_calculators += 1
 
-            # Reduce if near bugs (calculation errors)
-            bug_neighbors = self._count_neighbors(x, y, CellType.GRID_BUG)
-            contribution *= (1.0 - bug_neighbors * 0.15)
+            # Collaboration bonus
+            contribution *= (1.0 + nearby_calculators * 0.1)
+
+            # Penalty for nearby bugs (interference)
+            nearby_bugs = 0
+            for dy in [-1, 0, 1]:
+                for dx in [-1, 0, 1]:
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < self.width and 0 <= ny < self.height:
+                        if self.grid[ny][nx].cell_type == CellType.GRID_BUG:
+                            nearby_bugs += 1
+
+            contribution *= max(0.5, 1.0 - nearby_bugs * 0.15)
 
             total_contribution += contribution
 
-        # Normalize and convert to Fibonacci sequence
-        normalized = int(total_contribution * 1000)
+        # If no calculators at all, use fallback
+        if not calculator_programs and total_contribution == 0:
+            return self._fallback_calculation()
 
-        # Use previous results to calculate next Fibonacci
-        if not hasattr(self, '_prev_calc_results'):
-            self._prev_calc_results = [0, 1]
+        # Use total contribution to advance Fibonacci sequence
+        if not hasattr(self, '_grid_fib_history'):
+            self._grid_fib_history = [0, 1]
+            self._grid_fib_contribution = 0
 
-        # Calculate next Fibonacci based on grid calculation
-        # The contribution influences how much we advance
-        advance_amount = int(normalized % 3) + 1  # 1, 2, or 3 steps
+        # Accumulate contribution over time
+        self._grid_fib_contribution += total_contribution
 
-        for _ in range(advance_amount):
-            next_val = self._prev_calc_results[-2] + self._prev_calc_results[-1]
-            self._prev_calc_results.append(next_val)
+        # When contribution threshold is reached, advance Fibonacci
+        advance_threshold = 5.0  # Adjust this to control calculation speed
 
-        # Keep only last 2 for memory
-        if len(self._prev_calc_results) > 100:
-            self._prev_calc_results = self._prev_calc_results[-2:]
+        if self._grid_fib_contribution >= advance_threshold:
+            steps = int(self._grid_fib_contribution // advance_threshold)
+            self._grid_fib_contribution %= advance_threshold
 
-        return self._prev_calc_results[-1]
+            for _ in range(steps):
+                next_val = self._grid_fib_history[-2] + self._grid_fib_history[-1]
+                self._grid_fib_history.append(next_val)
+
+        # Return current Fibonacci number
+        return self._grid_fib_history[-1]
 
     def _find_optimization_target(self, x, y):
         """Find target location that would optimize calculation loop"""
@@ -2371,7 +2413,23 @@ class EnhancedTRONSimulation:
         print("=" * 70)
 
         # calculation program count
-        calc_count = self.grid.get_calculator_count()
+        # Count actual active calculators
+        calc_count = 0
+        total_calc_power = 0
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                cell = self.grid.grid[y][x]
+                if cell.cell_type == CellType.MCP_PROGRAM:
+                    if cell.metadata and cell.metadata.get('is_calculator', False):
+                        calc_count += 1
+                        total_calc_power += cell.energy
+
+        # Display calculation info
+        calc_text = f"Grid Calculation: {self.grid.calculation_result:,}"
+        if calc_count > 0:
+            calc_text += f" ({calc_count} calculators, power: {total_calc_power:.1f})"
+        else:
+            calc_text += " (No grid calculators - using direct calculation)"
         print(f"  Active Calculators: {calc_count}")
 
         print("=" * 70)
@@ -2621,7 +2679,7 @@ class EnhancedTRONSimulation:
             if stats_y + 3 < height - 10:
                 stdscr.addstr(stats_y + 3, 2, f"MCP Control: {self.grid.stats['mcp_control']:.2f}")
 
-            if stats_y + 4 < height - 10:
+            if stats_y + 4 < height - 5:
                 stdscr.addstr(stats_y + 4, 2, f"Resource Usage: {self.grid.stats['resource_usage']:.2f}")
 
             # Display calculator count and Fibonacci result
@@ -2631,8 +2689,8 @@ class EnhancedTRONSimulation:
                                 (self.grid.grid[y][x].metadata or {}).get('is_calculator', False))
 
             # Make sure we have room for this line
-            calc_line_y = loop_y + 2
-            if calc_line_y < height - 10:
+            calc_line_y = loop_y + 9
+            if calc_line_y < height - 5:
                 if calculator_count > 0:
                     calc_text = f"Grid Calculation: {self.grid.calculation_result:,} ({calculator_count} calc)"
                 else:
