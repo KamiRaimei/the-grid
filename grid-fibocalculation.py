@@ -2978,7 +2978,7 @@ class EnhancedTRONSimulation:
                 if cell.metadata.get('energy_spark', False):
                     char = '*'  # Spark effect
                 elif cell.metadata.get('recently_active', False):
-                    char = '◉' if cell.animation_frame % 2 == 0 else '◎'
+                    char = '●' if cell.animation_frame % 2 == 0 else '○'
 
                 row += char
             row += "|"
@@ -3020,7 +3020,7 @@ class EnhancedTRONSimulation:
         # Fibonacci calculation info
         print("\n" + "-" * 70)
         print("FIBONACCI CALCULATION:")
-        print(f"  Current: {calc_stats['current_fibonacci']:,}")
+        print(f"  Current: {calc_stats['current_fibonacci_formatted']}")
         print(f"  Accumulator: {calc_stats['accumulator']:.2f}/5.0")
         print(f"  Efficiency: {calc_stats['efficiency_score']:.2f}")
         print(f"  Optimization: {calc_stats['optimization_level']:.2f}")
@@ -3028,8 +3028,8 @@ class EnhancedTRONSimulation:
         # Calculator count
         calc_count = self.grid.get_calculator_count()
         fib_processors = sum(1 for y in range(self.grid.height)
-                           for x in range(self.grid.width)
-                           if self.grid.grid[y][x].cell_type == CellType.FIBONACCI_PROCESSOR)
+                            for x in range(self.grid.width)
+                            if self.grid.grid[y][x].cell_type == CellType.FIBONACCI_PROCESSOR)
         print(f"  Active Calculators: {calc_count} MCP + {fib_processors} Processors")
 
         # Learning status (periodic update)
