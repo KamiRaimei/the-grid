@@ -18,6 +18,8 @@ import argparse
 from datetime import datetime
 import math
 
+sys.set_int_max_str_digits(10000)
+
 # Check for required modules, note that windows does not support curses.
 try:
     import curses
@@ -378,9 +380,28 @@ class GridFibonacciCalculator:
 
     def format_fibonacci_number(self, num):
         """Format Fibonacci number to show only first 30 digits if too large"""
-        num_str = str(num)
+        try:
+            num_str = str(num)
+        except ValueError as e:
+            # If we hit the limit, use scientific notation or truncation
+            # Estimate the number of digits using log10
+            if num == 0:
+                return "0"
+
+            # For very large numbers, use log10 to get approximate value
+            import math
+            log10 = math.log10(num)
+            digits = int(log10) + 1
+            if digits > 30:
+                # Get first 30 digits using division
+                first_30 = num // (10 ** (digits - 30))
+                return str(first_30) + f"... (×10^{digits-30})"
+            else:
+                # Shouldn't reach here, but fallback
+                return "Very large number"
+
         if len(num_str) > 30:
-            return num_str[:30] + "..."
+            return num_str[:30] + f"... ({len(num_str)} digits)"
         return num_str
 
     def get_calculation_stats(self):
