@@ -105,10 +105,16 @@ class GridCell:
             # Single character energy line
             energy_chars = ['=', '=', '≡', '≡']  # Use simpler chars for alignment
             return energy_chars[self.animation_frame % 4]
-        elif self.cell_type == CellType.FIBONACCI_PROCESSOR:
-            # Single character processor showing calculation
-            processor_chars = ['F', 'F', 'φ', 'φ']  # Use simpler chars for alignment
-            return processor_chars[self.animation_frame % 4]
+        if self.cell_type == CellType.FIBONACCI_PROCESSOR:
+            # Enhanced animation for Fibonacci processors
+            if self.processing:
+                # When actively calculating, show more dynamic animation
+                processor_chars = ['◉', '◎', '●', '○', '◌', '⊕', '⊗', '∅']
+                return processor_chars[self.animation_frame % 8]
+            else:
+                # Idle state
+                processor_chars = ['F', 'φ', 'f', 'Φ']
+                return processor_chars[self.animation_frame % 4]
         elif self.processing:
             # Use single-character processing indicators
             return '○' if self.animation_frame % 2 == 0 else '●'
@@ -228,7 +234,9 @@ class GridFibonacciCalculator:
 
                 elif cell.cell_type == CellType.FIBONACCI_PROCESSOR:
                     # Special Fibonacci processors
-                    contribution = cell.energy * 0.5
+                    contribution = cell.energy * 0.8
+                    if not cell.metadata.get('temporary', False):
+                        contribution *= 1.5
                     active_calculators += 1
 
                 elif cell.cell_type == CellType.USER_PROGRAM:
@@ -273,6 +281,16 @@ class GridFibonacciCalculator:
             self.calculation_rate = total_energy / time_delta
 
         self.last_calculation_time = current_time
+
+        # Processing visual feedback
+        if contribution > 0 and cell.cell_type == CellType.FIBONACCI_PROCESSOR:
+            cell.calculation_contribution = contribution
+            cell.processing = True
+
+            # Visual pulse effect for major contributors
+            if contribution > 0.3:
+                cell.metadata['pulse_strength'] = min(1.0, contribution)
+                cell.metadata['pulse_timer'] = 3
 
         # Update calculation accumulator
         self.calculation_accumulator += total_energy
@@ -1131,14 +1149,76 @@ class TRONGrid:
                             False
                         )
 
+                # FIBONACCI PROCESSORS - Persist and contribute to calculation
+                elif cell.cell_type == CellType.FIBONACCI_PROCESSOR:
+                    # Handle temporary processors
+                    if cell.metadata.get('temporary', False):
+                        lifetime = cell.metadata.get('lifetime', 0) - 1
+                        if lifetime <= 0:
+                            # Expire - leave energy residue
+                            if random.random() < 0.3:
+                                new_grid[y][x] = GridCell(CellType.ENERGY_LINE, 0.4)
+                            else:
+                                new_grid[y][x] = GridCell(CellType.EMPTY, 0.0)
+                        else:
+                            # Continue temporary processor with energy decay
+                            new_cell = GridCell(
+                                cell.cell_type,
+                                max(0.3, cell.energy - 0.1),  # Fast energy decay
+                                cell.age + 1
+                            )
+                            new_cell.metadata = cell.metadata.copy()
+                            new_cell.metadata['lifetime'] = lifetime
+                            new_grid[y][x] = new_cell
+                    else:
+                        # Permanent processor - persist with slow energy decay
+                        new_cell = GridCell(
+                            cell.cell_type,
+                            max(0.5, cell.energy - 0.02),  # Slow energy decay
+                            cell.age + 1
+                        )
+                        # Copy metadata for calculation power
+                        new_cell.metadata = cell.metadata.copy()
+                        new_cell.metadata['age'] = cell.metadata.get('age', 0) + 1
+                        new_grid[y][x] = new_cell
+
                 # INFRASTRUCTURE - Persist
                 elif cell.cell_type in [CellType.ENERGY_LINE, CellType.DATA_STREAM,
-                                    CellType.SYSTEM_CORE, CellType.ISO_BLOCK, CellType.FIBONACCI_PROCESSOR]:
+                                    CellType.SYSTEM_CORE, CellType.ISO_BLOCK]:
                     new_grid[y][x] = GridCell(
                         cell.cell_type,
                         cell.energy,
                         cell.age + 1
                     )
+                    # Handle temporary Fibonacci processors
+                    if cell.cell_type == CellType.FIBONACCI_PROCESSOR and cell.metadata.get('temporary', False):
+                        lifetime = cell.metadata.get('lifetime', 0) - 1
+                        if lifetime <= 0:
+                            # Expire - convert to empty or energy trail
+                            if random.random() < 0.5:
+                                new_grid[y][x] = GridCell(CellType.ENERGY_LINE, 0.6)
+                            else:
+                                new_grid[y][x] = GridCell(CellType.EMPTY, 0.0)
+                        else:
+                            # Continue with reduced lifetime
+                            new_cell = GridCell(
+                                cell.cell_type,
+                                cell.energy * 0.95,  # Energy decays for temporary cells
+                                cell.age + 1
+                            )
+                            new_cell.metadata = cell.metadata.copy()
+                            new_cell.metadata['lifetime'] = lifetime
+                            new_grid[y][x] = new_cell
+                    else:
+                        # Permanent infrastructure (including permanent Fibonacci processors)
+                        new_cell = GridCell(
+                            cell.cell_type,
+                            cell.energy,
+                            cell.age + 1
+                        )
+                        # Copy metadata for permanent cells
+                        new_cell.metadata = cell.metadata.copy()
+                        new_grid[y][x] = new_cell
 
         # After evolution, spawn visual effects occasionally
         if random.random() < 0.1:  # 10% chance per generation
@@ -2295,6 +2375,17 @@ Type natural language commands. The MCP understands context."""
 
     def autonomous_action(self):
         """MCP takes autonomous actions prioritizing loop efficiency, stability, and calculation rate"""
+
+        current_time = time.time()
+
+        # Rate limiting - don't take actions too frequently
+        if hasattr(self, '_last_autonomous_action_time'):
+            time_since_last = current_time - self._last_autonomous_action_time
+            if time_since_last < 1.0:  # At most once per second
+                return None
+
+        self._last_autonomous_action_time = current_time
+
         previous_efficiency = self.grid.stats['loop_efficiency']
         previous_rate = self.grid.stats['calculation_rate']
         previous_stability = self.grid.stats['stability']
@@ -2303,6 +2394,11 @@ Type natural language commands. The MCP understands context."""
         suggested_action = self.learning_system.get_optimal_action_for_state(
             self.grid.stats.copy()
         )
+
+        # Safety check - ensure grid dimensions are valid
+        if self.grid.height <= 0 or self.grid.width <= 0:
+            self.add_log("MCP: Grid dimensions invalid, skipping action")
+            return None
 
         action = None
         action_type = None
@@ -2325,19 +2421,28 @@ Type natural language commands. The MCP understands context."""
                 # Strategy: Deploy more Fibonacci processors
                 deployed = 0
                 attempts = 0
+
+                if self.grid.width > 0 and self.grid.height > 0:
+                    center_x, center_y = self.grid.width // 2, self.grid.height // 2
+
                 while deployed < 2 and attempts < 10:  # Try to deploy 2 per cycle
                     # Prefer locations near the center for better connectivity
                     center_x, center_y = self.grid.width // 2, self.grid.height // 2
                     x = center_x + random.randint(-8, 8)
                     y = center_y + random.randint(-8, 8)
-                    x = max(0, min(self.grid.width - 1, x))
-                    y = max(0, min(self.grid.height - 1, y))
+
+                    # Clamp to grid bounds
+                    x = max(0, min(x, self.grid.width - 1))
+                    y = max(0, min(y, self.grid.height - 1))
 
                     if self.grid.grid[y][x].cell_type == CellType.EMPTY:
-                        self.grid.grid[y][x] = GridCell(CellType.FIBONACCI_PROCESSOR, 0.9)
+                        new_cell = GridCell(CellType.FIBONACCI_PROCESSOR, 0.9)
                         # Add metadata to boost calculation power
-                        self.grid.grid[y][x].metadata['calculation_power'] = 1.0
-                        self.grid.grid[y][x].metadata['calculation_boost'] = True
+                        new_cell.metadata['permanent'] = True
+                        new_cell.metadata['calculation_power'] = 1.0
+                        new_cell.metadata['creation_time'] = time.time()
+                        new_cell.metadata['calculation_boost'] = True
+                        self.grid.grid[y][x] = new_cell
                         deployed += 1
                         action = f"Deployed Fibonacci processor at ({x},{y}) to boost calculation rate"
                         action_type = "calculation_boost"
@@ -2382,34 +2487,54 @@ Type natural language commands. The MCP understands context."""
                 # Deploy data streams to improve connectivity
                 deployed = 0
                 for _ in range(3):  # Add multiple data streams
-                    # Find areas between calculators for connectivity
+                # Find calculator positions
                     calculator_positions = []
                     for y in range(self.grid.height):
                         for x in range(self.grid.width):
                             cell = self.grid.grid[y][x]
-                            if (cell.cell_type == CellType.MCP_PROGRAM and
-                                cell.metadata.get('is_calculator', False)) or \
-                               cell.cell_type == CellType.FIBONACCI_PROCESSOR:
+                            if ((cell.cell_type == CellType.MCP_PROGRAM and
+                                cell.metadata.get('is_calculator', False)) or
+                                cell.cell_type == CellType.FIBONACCI_PROCESSOR):
                                 calculator_positions.append((x, y))
 
-                    if len(calculator_positions) >= 2:
-                        # Connect two random calculators with a data stream
-                        x1, y1 = random.choice(calculator_positions)
-                        x2, y2 = random.choice(calculator_positions)
+                        if len(calculator_positions) >= 2:
+                            # Connect two random calculators with a data stream
+                            x1, y1 = random.choice(calculator_positions)
+                            x2, y2 = random.choice(calculator_positions)
 
-                        # Create path between them
-                        dx = 1 if x2 > x1 else -1 if x2 < x1 else 0
-                        dy = 1 if y2 > y1 else -1 if y2 < y1 else 0
+                            # Create path between them with safe direction calculation
+                            dx = 1 if x2 > x1 else -1 if x2 < x1 else 0
+                            dy = 1 if y2 > y1 else -1 if y2 < y1 else 0
 
-                        # Place data streams along path
-                        x, y = x1, y1
-                        while (x != x2 or y != y2) and deployed < 5:
-                            x = min(max(x + dx, 0), self.grid.width - 1)
-                            y = min(max(y + dy, 0), self.grid.height - 1)
+                            # SAFETY CHECK: Skip if both dx and dy are 0 (same cell)
+                            if dx == 0 and dy == 0:
+                                continue  # Skip if same point
 
-                            if self.grid.grid[y][x].cell_type == CellType.EMPTY:
-                                self.grid.grid[y][x] = GridCell(CellType.DATA_STREAM, 0.7)
-                                deployed += 1
+                            x, y = x1, y1
+                            max_steps = 20  # Prevent infinite paths
+                            steps = 0
+
+                            while (x != x2 or y != y2) and deployed < 5 and steps < max_steps:
+                                # Move with bounds checking
+                                if dx != 0:
+                                    x += dx
+                                    x = max(0, min(x, self.grid.width - 1))
+                                if dy != 0:
+                                    y += dy
+                                    y = max(0, min(y, self.grid.height - 1))
+
+                                # Place data stream if empty
+                                if (0 <= x < self.grid.width and 0 <= y < self.grid.height and
+                                    self.grid.grid[y][x].cell_type == CellType.EMPTY):
+                                    self.grid.grid[y][x] = GridCell(CellType.DATA_STREAM, 0.7)
+                                    deployed += 1
+
+                                steps += 1
+
+                                # Break if stuck (not moving)
+                                if steps > 1 and (x == prev_x and y == prev_y):
+                                    break
+                                prev_x, prev_y = x, y
 
                 if deployed > 0:
                     action = f"Added {deployed} data streams to improve cell cooperation"
