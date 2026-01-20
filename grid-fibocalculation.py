@@ -33,7 +33,7 @@ except ImportError:
 GRID_WIDTH = 50
 GRID_HEIGHT = 30
 UPDATE_INTERVAL = 0.25  # seconds
-MCP_UPDATE_INTERVAL = 0.8  # seconds for MCP autonomous actions
+MCP_UPDATE_INTERVAL = 2  # seconds for MCP autonomous actions
 MAX_SPECIAL_PROGRAMS = 10
 SPECIAL_PROGRAM_TYPES = ["SCANNER", "DEFENDER", "REPAIR", "SABOTEUR", "RECONFIGURATOR", "ENERGY_HARVESTER", "FIBONACCI_CALCULATOR"]
 
@@ -69,7 +69,7 @@ class MCPState(Enum):
     HOSTILE = "HOSTILE"
     AUTONOMOUS = "AUTONOMOUS"
     INQUISITIVE = "INQUISITIVE"
-    LEARNING = "LEARNING"  # New state for learning from failures
+    LEARNING = "LEARNING"
 
 # ==================== ENHANCED CELL VISUALIZATION ====================
 
@@ -81,9 +81,9 @@ class GridCell:
     stable: bool = True
     special_program_id: Optional[str] = None  # ID if this is a special program
     metadata: Dict[str, Any] = None
-    animation_frame: int = 0  # NEW: For visual effects
-    processing: bool = False  # NEW: Visual processing indicator
-    calculation_contribution: float = 0.0  # NEW: Track contribution to Fibonacci calculation
+    animation_frame: int = 0
+    processing: bool = False
+    calculation_contribution: float = 0.0
 
     def __post_init__(self):
         if self.metadata is None:
@@ -2210,7 +2210,7 @@ Type natural language commands. The MCP understands context."""
                             for x in range(self.grid.width):
                                 cell = self.grid.grid[y][x]
                                 if cell.cell_type == CellType.USER_PROGRAM:
-                                    user_neighbors = self._count_user_neighbors(x, y)
+                                    user_neighbors = self.grid._count_user_neighbors(x, y)
                                     if user_neighbors > 2:
                                         optimization_targets.append((x, y))
 
