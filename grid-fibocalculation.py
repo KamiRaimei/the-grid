@@ -10,6 +10,9 @@ import time
 import random
 import re
 import json
+import signal
+import threading
+from queue import Queue
 from collections import deque, defaultdict
 from enum import Enum
 from dataclasses import dataclass, asdict
@@ -32,8 +35,8 @@ except ImportError:
 # Grid constants
 GRID_WIDTH = 50
 GRID_HEIGHT = 30
-UPDATE_INTERVAL = 0.25  # seconds
-MCP_UPDATE_INTERVAL = 2  # seconds
+UPDATE_INTERVAL = 0.25  # seconds (simulation update rate)
+MCP_UPDATE_INTERVAL = 5  # seconds (controls MCP AUTONOMOUS action rate)
 MAX_SPECIAL_PROGRAMS = 10
 SPECIAL_PROGRAM_TYPES = ["SCANNER", "DEFENDER", "REPAIR", "SABOTEUR", "RECONFIGURATOR", "ENERGY_HARVESTER", "FIBONACCI_CALCULATOR"]
 
@@ -171,6 +174,30 @@ class GridFibonacciCalculator:
         self.efficiency_score = 0.5
         self.optimization_level = 0.0
 
+        # Calculation threading
+        self.calculation_queue = Queue()
+        self.calculation_thread = threading.Thread(target=self._calculation_worker, daemon=True)
+        self.calculation_thread.start()
+
+    def _calculation_worker(self):
+        """Background worker with proper sleep to prevent CPU hogging"""
+        while True:
+            try:
+                # Process calculations with sleep to yield CPU
+                if not self.calculation_queue.empty():
+                    # Process a batch of calculations
+                    batch_size = min(10, self.calculation_queue.qsize())
+                    for _ in range(batch_size):
+                        try:
+                            task = self.calculation_queue.get_nowait()
+                            # Process task
+                            self.calculation_queue.task_done()
+                        except:
+                            break
+                time.sleep(0.05)  # Increased from 0.1 to 0.05 for better responsiveness
+            except:
+                time.sleep(0.1)
+
     def calculate_next(self):
         """Calculate next Fibonacci number through cell cooperation"""
         contributions = []
@@ -263,20 +290,20 @@ class GridFibonacciCalculator:
         calculation_threshold = 1000  # Adjust for calculation speed
 
         steps_taken = 0
-        while self.calculation_accumulator >= calculation_threshold:
+        max_steps_per_frame = 10  # Prevent infinite loops
+
+        while self.calculation_accumulator >= calculation_threshold and steps_taken < max_steps_per_frame:
             # Calculate next Fibonacci number
             next_fib = self.fib_sequence[-2] + self.fib_sequence[-1]
             self.fib_sequence.append(next_fib)
 
-            # Keep sequence manageable
             if len(self.fib_sequence) > 100:
                 self.fib_sequence = self.fib_sequence[-100:]
 
             self.calculation_accumulator -= calculation_threshold
             steps_taken += 1
 
-            # Create visual feedback for successful calculation
-            if steps_taken == 1:  # Only for first step in this cycle
+            if steps_taken == 1:
                 self._create_calculation_visual_feedback(contributions)
 
         # Update efficiency score
@@ -700,8 +727,8 @@ class TRONGrid:
             'user_resistance': 0.1,
             'mcp_control': 0.5,
             'optimal_state': 0.0,
-            'calculation_rate': 0.0,  # NEW
-            'cell_cooperation': 0.5,  # NEW
+            'calculation_rate': 0.0,  # calculation rate of simulation
+            'cell_cooperation': 0.5,  # cell coorperation stats
         }
         self.system_status = SystemStatus.OPTIMAL
         self.history = deque(maxlen=100)
@@ -709,7 +736,7 @@ class TRONGrid:
 
         # Enhanced tracking
         self.resource_history = deque(maxlen=50)
-        self.visual_effects = deque(maxlen=20)  # NEW: Store visual effects
+        self.visual_effects = deque(maxlen=20)  # Store visual effects
 
         # Calculation system
         self.calculation_loop_active = True
@@ -728,6 +755,30 @@ class TRONGrid:
         # Calculation variables for display
         self.calculation_result = 0
         self.calc_a, self.calc_b = 0, 1
+
+        # pre-compute neighbor cells offsets - optimization
+        self.neighbor_offsets_1 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        self.neighbor_offsets_8 = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1),           (0, 1),
+            (1, -1),  (1, 0),  (1, 1)
+        ]
+
+        # Cooldown on heavy compute time - Optimizations
+        self.last_expensive_op_time = 0
+        self.expensive_op_cooldown = 0.5  # seconds
+
+    def _get_neighbors(self, x, y, radius=1):
+        """Get valid neighbor coordinates without bounds checking in inner loops"""
+        neighbors = []
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    neighbors.append((nx, ny))
+        return neighbors
 
     def _calculate_system_stability(self, counts, total_energy, total_cells):
         """Calculate overall system stability based on multiple factors"""
@@ -1149,6 +1200,11 @@ class TRONGrid:
 
     def _spawn_visual_effect(self):
         """Spawn random visual effects to make grid look alive"""
+        #rate limiter
+        current_time = time.time()
+        if current_time - self.last_expensive_op_time < self.expensive_op_cooldown:
+            return
+
         effect_type = random.choice([
             'energy_pulse', 'data_burst', 'calculation_spark', 'system_pulse'
         ])
@@ -1192,6 +1248,8 @@ class TRONGrid:
             'y': y,
             'time': time.time()
         })
+
+        self.last_expensive_op_time = current_time
 
     def _calculate_loop_efficiency(self):
         """Enhanced efficiency calculation including cell cooperation"""
@@ -1331,6 +1389,8 @@ class TRONGrid:
         counts = {cell_type: 0 for cell_type in CellType}
         total_energy = 0
         total_cells = self.width * self.height
+
+
 
         for y in range(self.height):
             for x in range(self.width):
@@ -3055,17 +3115,40 @@ class EnhancedTRONSimulation:
         self.command_history = []
         self.history_index = 0
         self.simulation_speed = 1.0
+        self.last_safe_time = time.time()
+        self.max_update_time = 1.0  # Max simulation update rate
 
         # Learning display updates
         self.last_learning_display = time.time()
         self.learning_update_interval = 5.0  # seconds
 
+        # Render configuration - optimization
+        self.last_frame_time = time.time()
+        self.target_fps = 30  # FPS Limit
+
     def run(self):
-        """Main simulation loop"""
+        """Main loop with rate limiting"""
         if self.use_curses:
             curses.wrapper(self._curses_main)
         else:
             self._fallback_main()
+
+        while self.running:
+            current_time = time.time()
+            frame_time = 1.0 / self.target_fps
+
+            # Only update if enough time has passed
+            if current_time - self.last_frame_time >= frame_time:
+                # Update simulation
+                self.grid.evolve()
+                self.last_frame_time = current_time
+
+            # Handle input and display (these can run at full speed)
+            self._handle_input()
+            self._draw_interface()
+
+            # Small sleep to prevent CPU hogging
+            time.sleep(0.001)
 
     def _fallback_main(self):
         """Fallback main loop without curses"""
@@ -3122,6 +3205,7 @@ class EnhancedTRONSimulation:
         curses.curs_set(1)
         stdscr.nodelay(1)
         stdscr.timeout(50)  # 50ms timeout for faster response
+
 
         # Initialize colors if supported
         if curses.has_colors():
