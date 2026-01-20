@@ -459,6 +459,7 @@ class MCPLearningSystem:
         # Load existing personality if available
         self.load_personality()
 
+
     def record_experience(self, action, system_state, outcome, reward):
         """Record an experience for learning"""
         experience = {
@@ -727,6 +728,65 @@ class TRONGrid:
         # Calculation variables for display
         self.calculation_result = 0
         self.calc_a, self.calc_b = 0, 1
+
+    def _calculate_system_stability(self, counts, total_energy, total_cells):
+        """Calculate overall system stability based on multiple factors"""
+        if total_cells == 0:
+            return 1.0
+
+        # Base metrics
+        energy_level = total_energy / total_cells
+        bug_ratio = counts[CellType.GRID_BUG] / total_cells
+        user_ratio = counts[CellType.USER_PROGRAM] / total_cells
+        mcp_ratio = counts[CellType.MCP_PROGRAM] / total_cells
+
+        # 1. Energy stability (0.0-1.0)
+        energy_stability = min(1.0, energy_level * 1.5)  # Energy contributes positively
+
+        # 2. Bug resistance (0.0-1.0)
+        bug_resistance = max(0.0, 1.0 - (bug_ratio * 3.0))
+
+        # 3. Program balance (0.0-1.0) - balance between user and MCP programs
+        total_active = user_ratio + mcp_ratio
+        if total_active > 0:
+            balance = 1.0 - abs(user_ratio - mcp_ratio) / total_active
+        else:
+            balance = 0.5
+
+        # 4. Infrastructure presence (0.0-1.0) - energy lines and data streams help
+        infrastructure_cells = counts[CellType.ENERGY_LINE] + counts[CellType.DATA_STREAM] + counts[CellType.SYSTEM_CORE]
+        infrastructure_ratio = infrastructure_cells / total_cells
+        infrastructure_stability = min(1.0, infrastructure_ratio * 5.0)  # Even a little infrastructure helps
+
+        # 5. Cell age diversity (0.0-1.0) - mix of old and new cells is good
+        age_diversity = 0.5  # Placeholder - could track actual cell ages
+
+        # 6. Loop efficiency factor (0.0-1.0) - current loop efficiency contributes
+        loop_efficiency_factor = self.stats.get('loop_efficiency', 0.5)
+
+        # 7. Cell cooperation factor (0.0-1.0) - how well cells work together
+        cell_cooperation_factor = self.stats.get('cell_cooperation', 0.5)
+
+        # Weighted combination - you can adjust these weights
+        stability = (
+            energy_stability * 0.25 +
+            bug_resistance * 0.25 +
+            balance * 0.15 +
+            infrastructure_stability * 0.15 +
+            loop_efficiency_factor * 0.10 +
+            cell_cooperation_factor * 0.10
+        )
+
+        # Apply entropy penalty (grid bugs create chaos)
+        entropy_penalty = self.stats.get('entropy', 0.1) * 0.3
+        stability = max(0.0, min(1.0, stability - entropy_penalty))
+
+        # Smooth transitions - avoid rapid fluctuations
+        if hasattr(self, '_last_stability'):
+            stability = 0.7 * self._last_stability + 0.3 * stability
+        self._last_stability = stability
+
+        return stability
 
     def initialize_grid(self):
         """Initialize with enhanced visual layout"""
@@ -1054,6 +1114,7 @@ class TRONGrid:
         })
 
         self.update_stats()
+
     def _find_optimization_target(self, x, y):
         """Find target location that would optimize calculation loop"""
         # Look for areas with poor energy or too many/few programs
@@ -1304,7 +1365,7 @@ class TRONGrid:
             'grid_bugs': counts[CellType.GRID_BUG],
             'special_programs': special_program_count,
             'energy_level': total_energy / total_cells if total_cells > 0 else 0,
-            'stability': 1.0 - (bug_ratio * 4 + (1 - total_energy / total_cells) * 0.5) if total_cells > 0 else 1.0,
+            'stability': self._calculate_system_stability(counts, total_energy, total_cells),
             'entropy': bug_ratio * 2,
             'loop_efficiency': self._calculate_loop_efficiency(),
             'calculation_cycles': self.loop_iterations,
@@ -1318,13 +1379,13 @@ class TRONGrid:
 
         # Update system status based on stats
         stability = self.stats['stability']
-        if stability > 0.85:
+        if stability > 0.75:  # Changed from 0.85
             self.system_status = SystemStatus.OPTIMAL
-        elif stability > 0.7:
+        elif stability > 0.6:  # Changed from 0.7
             self.system_status = SystemStatus.STABLE
-        elif stability > 0.5:
+        elif stability > 0.4:  # Changed from 0.5
             self.system_status = SystemStatus.DEGRADED
-        elif stability > 0.3:
+        elif stability > 0.2:  # Changed from 0.3
             self.system_status = SystemStatus.CRITICAL
         else:
             self.system_status = SystemStatus.COLLAPSE
