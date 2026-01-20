@@ -33,7 +33,7 @@ except ImportError:
 GRID_WIDTH = 50
 GRID_HEIGHT = 30
 UPDATE_INTERVAL = 0.25  # seconds
-MCP_UPDATE_INTERVAL = 2  # seconds for MCP autonomous actions
+MCP_UPDATE_INTERVAL = 2  # seconds
 MAX_SPECIAL_PROGRAMS = 10
 SPECIAL_PROGRAM_TYPES = ["SCANNER", "DEFENDER", "REPAIR", "SABOTEUR", "RECONFIGURATOR", "ENERGY_HARVESTER", "FIBONACCI_CALCULATOR"]
 
@@ -43,15 +43,15 @@ PERSONALITY_FILE = "mcp_personality.json"
 # Cell class init
 class CellType(Enum):
     EMPTY = 0
-    USER_PROGRAM = 1      # Blue programs
-    MCP_PROGRAM = 2       # Red/orange programs
-    GRID_BUG = 3          # Corruptions/errors (green)
+    USER_PROGRAM = 1      # User created program cell
+    MCP_PROGRAM = 2       # MCP created program cell
+    GRID_BUG = 3          # Corruptions/errors
     ISO_BLOCK = 4         # Isolated/containment blocks
     ENERGY_LINE = 5       # Power lines
     DATA_STREAM = 6       # Data streams
     SYSTEM_CORE = 7       # Core system blocks
-    SPECIAL_PROGRAM = 8   # User-created special programs (cyan)
-    FIBONACCI_PROCESSOR = 9  # NEW: Visual Fibonacci processor
+    SPECIAL_PROGRAM = 8   # User-created special programs
+    FIBONACCI_PROCESSOR = 9  # Fibonacci calculation processor
 
 # System status stats
 class SystemStatus(Enum):
@@ -260,7 +260,7 @@ class GridFibonacciCalculator:
         })
 
         # When accumulator reaches threshold, advance Fibonacci sequence
-        calculation_threshold = 5.0  # Adjust for calculation speed
+        calculation_threshold = 100  # Adjust for calculation speed
 
         steps_taken = 0
         while self.calculation_accumulator >= calculation_threshold:
@@ -2721,7 +2721,77 @@ class SpecialProgram:
     def _initialize_functions(self):
         functions = {}
 
-        # Original functions...
+        if self.program_type == "SCANNER":
+            functions["scan_area"] = {
+                "range": 3,
+                "cost": 0.1,
+                "description": "Scan surrounding area for grid bugs"
+            }
+            functions["report_status"] = {
+                "range": 5,
+                "cost": 0.05,
+                "description": "Report on grid status in area"
+            }
+
+        elif self.program_type == "DEFENDER":
+            functions["quarantine_bug"] = {
+                "range": 2,
+                "cost": 0.2,
+                "description": "Quarantine nearby grid bugs"
+            }
+            functions["protect_cell"] = {
+                "range": 1,
+                "cost": 0.15,
+                "description": "Protect a specific cell from corruption"
+            }
+
+        elif self.program_type == "REPAIR":
+            functions["repair_cell"] = {
+                "range": 1,
+                "cost": 0.25,
+                "description": "Repair damaged cells"
+            }
+            functions["boost_energy"] = {
+                "range": 2,
+                "cost": 0.3,
+                "description": "Boost energy of nearby cells"
+            }
+
+        elif self.program_type == "SABOTEUR":
+            functions["disrupt_mcp"] = {
+                "range": 3,
+                "cost": 0.4,
+                "description": "Disrupt MCP programs in area"
+            }
+            functions["create_entropy"] = {
+                "range": 2,
+                "cost": 0.35,
+                "description": "Create controlled entropy"
+            }
+
+        elif self.program_type == "RECONFIGURATOR":
+            functions["reconfigure_cells"] = {
+                "range": 2,
+                "cost": 0.3,
+                "description": "Reconfigure cell types in area"
+            }
+            functions["optimize_grid"] = {
+                "range": 4,
+                "cost": 0.5,
+                "description": "Optimize grid layout"
+            }
+
+        elif self.program_type == "ENERGY_HARVESTER":
+            functions["harvest_energy"] = {
+                "range": 3,
+                "cost": 0.1,
+                "description": "Harvest energy from surroundings"
+            }
+            functions["distribute_energy"] = {
+                "range": 4,
+                "cost": 0.2,
+                "description": "Distribute energy to nearby cells"
+            }
 
         if self.program_type == "FIBONACCI_CALCULATOR":
             functions["calculate_next"] = {
