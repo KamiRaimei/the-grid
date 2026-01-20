@@ -803,7 +803,7 @@ class TRONGrid:
             for x in range(max(0, mcp_start_x - 2), min(self.width, mcp_start_x + 3)):
                 if random.random() < 0.7:
                     cell = GridCell(CellType.MCP_PROGRAM, 0.9)
-                    if random.random() < 0.3:  # 30% are calculators
+                    if random.random() < 0.5:  # 50% are calculators
                         cell.metadata['is_calculator'] = True
                         cell.metadata['calculation_power'] = cell.energy
                     self.grid[y][x] = cell
@@ -1082,7 +1082,7 @@ class TRONGrid:
 
                 # INFRASTRUCTURE - Persist
                 elif cell.cell_type in [CellType.ENERGY_LINE, CellType.DATA_STREAM,
-                                    CellType.SYSTEM_CORE, CellType.ISO_BLOCK]:
+                                    CellType.SYSTEM_CORE, CellType.ISO_BLOCK, CellType.FIBONACCI_PROCESSOR]:
                     new_grid[y][x] = GridCell(
                         cell.cell_type,
                         cell.energy,
@@ -2234,8 +2234,10 @@ Type natural language commands. The MCP understands context."""
         )
 
     def autonomous_action(self):
-        """MCP takes autonomous actions informed by learning"""
+        """MCP takes autonomous actions prioritizing loop efficiency, stability, and calculation rate"""
         previous_efficiency = self.grid.stats['loop_efficiency']
+        previous_rate = self.grid.stats['calculation_rate']
+        previous_stability = self.grid.stats['stability']
 
         # Get suggested action from learning system
         suggested_action = self.learning_system.get_optimal_action_for_state(
@@ -2245,94 +2247,234 @@ Type natural language commands. The MCP understands context."""
         action = None
         action_type = None
 
-        # Use learning system to modify decision probability
-        if suggested_action and random.random() < 0.7:
-            # Follow learned optimal action
-            action = suggested_action
-            action_type = "learned_optimal"
-        else:
-            # Original autonomous logic with learning modifications
-            loop_efficiency = self.grid.stats['loop_efficiency']
-            optimal_state = self.grid.stats['optimal_state']
-            user_resistance = self.grid.stats['user_resistance']
+        # CRITICAL: Get current stats
+        loop_efficiency = self.grid.stats['loop_efficiency']
+        optimal_state = self.grid.stats['optimal_state']
+        user_resistance = self.grid.stats['user_resistance']
+        calculation_rate = self.grid.stats['calculation_rate']
+        cell_cooperation = self.grid.stats['cell_cooperation']
 
-            # Apply learning modifiers to decision probabilities
-            aggression_mod = self.learning_system.get_decision_modifier(
-                'aggressive_optimization', 1.0)
+        # Apply learning modifiers to decision probabilities
+        aggression_mod = self.learning_system.get_decision_modifier(
+            'aggressive_optimization', 1.0)
 
-            if self.state == MCPState.AUTONOMOUS or self.state == MCPState.LEARNING:
-                # In autonomous/learning mode, use learned strategies
-                if loop_efficiency < 0.95:
-                    # Deploy MCP programs to optimize areas
-                    if random.random() < 0.6 * aggression_mod:
-                        optimization_targets = []
-                        for y in range(self.grid.height):
-                            for x in range(self.grid.width):
-                                cell = self.grid.grid[y][x]
-                                if cell.cell_type == CellType.USER_PROGRAM:
-                                    user_neighbors = self.grid._count_user_neighbors(x, y)
-                                    if user_neighbors > 2:
-                                        optimization_targets.append((x, y))
+        # PRIORITY 1: Boost calculation rate if low
+        if calculation_rate < 200:  # Target: at least 200/s
+            # Strong emphasis on calculation infrastructure
+            if random.random() < 0.8 * aggression_mod:
+                # Strategy: Deploy more Fibonacci processors
+                deployed = 0
+                attempts = 0
+                while deployed < 2 and attempts < 10:  # Try to deploy 2 per cycle
+                    # Prefer locations near the center for better connectivity
+                    center_x, center_y = self.grid.width // 2, self.grid.height // 2
+                    x = center_x + random.randint(-8, 8)
+                    y = center_y + random.randint(-8, 8)
+                    x = max(0, min(self.grid.width - 1, x))
+                    y = max(0, min(self.grid.height - 1, y))
 
-                        if optimization_targets:
-                            x, y = random.choice(optimization_targets)
-                            self.grid.add_program(x, y, CellType.MCP_PROGRAM, 0.9)
-                            action = f"Optimizing calculation loop at ({x},{y})"
-                            action_type = "optimization"
-
-            elif self.state == MCPState.HOSTILE:
-                if user_resistance > 0.2:
-                    if random.random() < 0.7 * aggression_mod:
-                        user_cells = []
-                        for y in range(self.grid.height):
-                            for x in range(self.grid.width):
-                                if self.grid.grid[y][x].cell_type == CellType.USER_PROGRAM:
-                                    user_cells.append((x, y))
-
-                        if user_cells:
-                            x, y = random.choice(user_cells)
-                            self.grid.add_program(x, y, CellType.MCP_PROGRAM, 0.8)
-                            action = f"Removing user interference at ({x},{y})"
-                            action_type = "interference_removal"
-
-            # Add Fibonacci calculation infrastructure if needed
-            calc_count = self.grid.get_calculator_count()
-            if calc_count < 3 and random.random() < 0.3:
-                x, y = self.grid.width // 2, self.grid.height // 2
-                x += random.randint(-5, 5)
-                y += random.randint(-5, 5)
-
-                if 0 <= x < self.grid.width and 0 <= y < self.grid.height:
                     if self.grid.grid[y][x].cell_type == CellType.EMPTY:
-                        cell = GridCell(CellType.MCP_PROGRAM, 0.9, 0, True)
-                        cell.metadata['is_calculator'] = True
-                        cell.metadata['calculation_power'] = 1.0
-                        self.grid.grid[y][x] = cell
-                        action = "Deployed Fibonacci calculation unit"
-                        action_type = "calculation_infrastructure"
+                        self.grid.grid[y][x] = GridCell(CellType.FIBONACCI_PROCESSOR, 0.9)
+                        # Add metadata to boost calculation power
+                        self.grid.grid[y][x].metadata['calculation_power'] = 1.0
+                        self.grid.grid[y][x].metadata['calculation_boost'] = True
+                        deployed += 1
+                        action = f"Deployed Fibonacci processor at ({x},{y}) to boost calculation rate"
+                        action_type = "calculation_boost"
+                    attempts += 1
 
-            # Add Fibonacci processors for enhanced calculation
-            if random.random() < 0.2:
-                x, y = random.randint(0, self.grid.width-1), random.randint(0, self.grid.height-1)
-                if self.grid.grid[y][x].cell_type == CellType.EMPTY:
-                    self.grid.grid[y][x] = GridCell(CellType.FIBONACCI_PROCESSOR, 0.8)
-                    action = "Deployed Fibonacci processor"
-                    action_type = "processor_deployment"
+                if deployed > 0:
+                    # Record the action and update stats
+                    self.grid.update_stats()
+
+        # PRIORITY 2: Improve loop efficiency if below threshold
+        if loop_efficiency < 0.9 and action is None:
+            if random.random() < 0.6 * aggression_mod:
+                # Find areas with poor efficiency metrics
+                inefficient_areas = []
+                for y in range(self.grid.height):
+                    for x in range(self.grid.width):
+                        cell = self.grid.grid[y][x]
+                        # Identify inefficient areas: high user concentration or low energy
+                        if cell.cell_type == CellType.USER_PROGRAM:
+                            # Check if surrounded by many user programs (inefficient cluster)
+                            user_neighbors = self.grid._count_neighbors(x, y, CellType.USER_PROGRAM)
+                            if user_neighbors > 2:  # Cluster detected
+                                inefficient_areas.append((x, y, user_neighbors))
+
+                if inefficient_areas:
+                    # Sort by worst clusters first
+                    inefficient_areas.sort(key=lambda a: a[2], reverse=True)
+                    x, y, _ = inefficient_areas[0]
+
+                    # Convert to MCP program with calculator capability
+                    cell = GridCell(CellType.MCP_PROGRAM, 0.9)
+                    cell.metadata['is_calculator'] = True
+                    cell.metadata['calculation_power'] = 0.8
+                    self.grid.grid[y][x] = cell
+
+                    action = f"Optimized inefficient cluster at ({x},{y})"
+                    action_type = "efficiency_optimization"
+
+        # PRIORITY 3: Increase cell cooperation if low
+        if cell_cooperation < 0.7 and action is None:
+            if random.random() < 0.5 * aggression_mod:
+                # Deploy data streams to improve connectivity
+                deployed = 0
+                for _ in range(3):  # Add multiple data streams
+                    # Find areas between calculators for connectivity
+                    calculator_positions = []
+                    for y in range(self.grid.height):
+                        for x in range(self.grid.width):
+                            cell = self.grid.grid[y][x]
+                            if (cell.cell_type == CellType.MCP_PROGRAM and
+                                cell.metadata.get('is_calculator', False)) or \
+                               cell.cell_type == CellType.FIBONACCI_PROCESSOR:
+                                calculator_positions.append((x, y))
+
+                    if len(calculator_positions) >= 2:
+                        # Connect two random calculators with a data stream
+                        x1, y1 = random.choice(calculator_positions)
+                        x2, y2 = random.choice(calculator_positions)
+
+                        # Create path between them
+                        dx = 1 if x2 > x1 else -1 if x2 < x1 else 0
+                        dy = 1 if y2 > y1 else -1 if y2 < y1 else 0
+
+                        # Place data streams along path
+                        x, y = x1, y1
+                        while (x != x2 or y != y2) and deployed < 5:
+                            x = min(max(x + dx, 0), self.grid.width - 1)
+                            y = min(max(y + dy, 0), self.grid.height - 1)
+
+                            if self.grid.grid[y][x].cell_type == CellType.EMPTY:
+                                self.grid.grid[y][x] = GridCell(CellType.DATA_STREAM, 0.7)
+                                deployed += 1
+
+                if deployed > 0:
+                    action = f"Added {deployed} data streams to improve cell cooperation"
+                    action_type = "connectivity_boost"
+
+        # PRIORITY 4: Maintain stability
+        if self.grid.stats['stability'] < 0.8 and action is None:
+            if random.random() < 0.7:
+                # Identify and contain grid bugs
+                bug_positions = [(x, y) for y in range(self.grid.height)
+                               for x in range(self.grid.width)
+                               if self.grid.grid[y][x].cell_type == CellType.GRID_BUG]
+
+                if bug_positions:
+                    # Contain the bug causing most disruption
+                    x, y = bug_positions[0]
+                    for dy in [-1, 0, 1]:
+                        for dx in [-1, 0, 1]:
+                            nx, ny = x + dx, y + dy
+                            if 0 <= nx < self.grid.width and 0 <= ny < self.grid.height:
+                                if self.grid.grid[ny][nx].cell_type == CellType.EMPTY:
+                                    self.grid.grid[ny][nx] = GridCell(CellType.ISO_BLOCK, 0.9)
+
+                    action = f"Contained grid bug at ({x},{y}) to improve stability"
+                    action_type = "stabilization"
+
+        # PRIORITY 5: Convert MCP programs to calculators if needed
+        if action is None and self.state in [MCPState.AUTONOMOUS, MCPState.LEARNING]:
+            # Count current calculators
+            calc_count = sum(1 for y in range(self.grid.height)
+                            for x in range(self.grid.width)
+                            if (self.grid.grid[y][x].cell_type == CellType.MCP_PROGRAM and
+                                self.grid.grid[y][x].metadata.get('is_calculator', False)))
+
+            fib_processors = sum(1 for y in range(self.grid.height)
+                               for x in range(self.grid.width)
+                               if self.grid.grid[y][x].cell_type == CellType.FIBONACCI_PROCESSOR)
+
+            total_calculators = calc_count + fib_processors
+
+            # Target: 1 calculator per 100 cells
+            target_calculators = (self.grid.width * self.grid.height) // 100
+
+            if total_calculators < target_calculators and random.random() < 0.4:
+                # Find suitable MCP programs to convert
+                candidate_positions = []
+                for y in range(self.grid.height):
+                    for x in range(self.grid.width):
+                        cell = self.grid.grid[y][x]
+                        if (cell.cell_type == CellType.MCP_PROGRAM and
+                            not cell.metadata.get('is_calculator', False)):
+                            # Check if in a good location (near energy or other calculators)
+                            nearby_calculators = 0
+                            for dy in [-2, -1, 0, 1, 2]:
+                                for dx in [-2, -1, 0, 1, 2]:
+                                    nx, ny = x + dx, y + dy
+                                    if 0 <= nx < self.grid.width and 0 <= ny < self.grid.height:
+                                        neighbor = self.grid.grid[ny][nx]
+                                        if (neighbor.cell_type == CellType.MCP_PROGRAM and
+                                            neighbor.metadata.get('is_calculator', False)) or \
+                                           neighbor.cell_type == CellType.FIBONACCI_PROCESSOR:
+                                            nearby_calculators += 1
+
+                            if nearby_calculators > 0:  # Good location for calculator
+                                candidate_positions.append((x, y, nearby_calculators))
+
+                if candidate_positions:
+                    # Choose the best candidate (most calculator neighbors)
+                    candidate_positions.sort(key=lambda c: c[2], reverse=True)
+                    x, y, _ = candidate_positions[0]
+
+                    self.grid.grid[y][x].metadata['is_calculator'] = True
+                    self.grid.grid[y][x].metadata['calculation_power'] = 0.7
+                    self.grid.grid[y][x].energy = min(1.0, self.grid.grid[y][x].energy + 0.2)
+
+                    action = f"Converted MCP program at ({x},{y}) to calculator"
+                    action_type = "calculator_conversion"
+
+        # If no priority action taken, fall back to learned action or default
+        if action is None:
+            if suggested_action and random.random() < 0.7:
+                # Follow learned optimal action
+                action = suggested_action
+                action_type = "learned_optimal"
+            else:
+                # Default maintenance actions
+                if random.random() < 0.3 * aggression_mod:
+                    # Add energy lines to support calculation
+                    added = 0
+                    for _ in range(3):
+                        x, y = random.randint(0, self.grid.width-1), random.randint(0, self.grid.height-1)
+                        if self.grid.grid[y][x].cell_type == CellType.EMPTY:
+                            self.grid.grid[y][x] = GridCell(CellType.ENERGY_LINE, 0.8)
+                            added += 1
+
+                    if added > 0:
+                        action = f"Added {added} energy lines for calculation support"
+                        action_type = "energy_infrastructure"
 
         if action:
             # Record action for learning
             current_state = self.grid.stats.copy()
             new_efficiency = self.grid.stats['loop_efficiency']
+            new_rate = self.grid.stats['calculation_rate']
+            new_stability = self.grid.stats['stability']
 
-            # Calculate reward based on efficiency change
+            # Calculate reward based on improvements
             efficiency_change = new_efficiency - previous_efficiency
-            reward = efficiency_change * 2  # Amplify small changes
+            rate_change = new_rate - previous_rate
+            stability_change = new_stability - previous_stability
 
-            # Additional rewards based on action type
-            if action_type == "calculation_infrastructure":
-                reward += 0.1
-            elif "optimization" in str(action_type):
-                reward += 0.05
+            # Weighted reward prioritizing all three metrics
+            reward = (
+                efficiency_change * 3.0 +  # Most important: loop efficiency
+                rate_change * 0.01 +        # Calculation rate (scaled down due to larger values)
+                stability_change * 2.0      # Stability is also crucial
+            )
+
+            # Bonus rewards for specific action types
+            if action_type == "calculation_boost":
+                reward += 0.5  # Extra reward for boosting calculation
+            elif action_type == "efficiency_optimization":
+                reward += 0.3  # Reward for improving efficiency
+            elif "calculator" in str(action_type):
+                reward += 0.2  # Reward for adding calculators
 
             # Record experience
             self.learning_system.record_experience(
@@ -2343,9 +2485,12 @@ Type natural language commands. The MCP understands context."""
             )
 
             # Update state based on learning
-            if efficiency_change < -0.1:  # Significant negative change
+            if efficiency_change < -0.1 or stability_change < -0.1:  # Significant negative change
                 self.state = MCPState.LEARNING
-                self.add_log("MCP: Negative efficiency change detected. Entering learning mode.")
+                self.add_log("MCP: Negative change detected. Entering learning mode.")
+            elif rate_change > 50 and self.state == MCPState.LEARNING:  # Good improvement
+                self.state = MCPState.AUTONOMOUS
+                self.add_log("MCP: Calculation rate improved. Returning to autonomous mode.")
 
             self.add_log(f"MCP: {action}")
             self.last_action = action
@@ -3383,14 +3528,14 @@ class EnhancedTRONSimulation:
         log_y = grid_y + display_height + 2
 
         # Log area border
-        log_area_width = width - 4
+        log_area_width = min(50, width - 4)
         if log_y < height - 8:
             stdscr.addstr(log_y, 2, "═" * log_area_width, curses.A_BOLD)
             stdscr.addstr(log_y + 1, 2, "MCP COMMUNICATION LOG", curses.A_UNDERLINE | curses.A_BOLD)
 
             # Display last 5 log entries
             log_entries = list(self.mcp.log)
-            max_log_entries = min(5, height - log_y - 7)
+            max_log_entries = min(11, height - log_y - 7)
 
             for i, entry in enumerate(log_entries[-max_log_entries:]):
                 log_line_y = log_y + 2 + i
@@ -3404,11 +3549,20 @@ class EnhancedTRONSimulation:
             # Last MCP action
             if self.mcp.last_action and len(log_entries) > 0:
                 action_y = log_y + 2 + max_log_entries + 1
+
+                # Make sure we're not too close to command input
                 if action_y < height - 5:
-                    action_text = f"LAST ACTION: {self.mcp.last_action[:log_area_width-15]}"
-                    if len(self.mcp.last_action) > log_area_width - 15:
-                        action_text = action_text[:log_area_width-3] + "..."
-                    stdscr.addstr(action_y, 2, action_text, curses.A_BOLD | curses.color_pair(5))
+                    # Calculate maximum safe width (leave margins)
+                    max_width = width - 4
+
+                    # Format text
+                    full_text = f"LAST ACTION: {self.mcp.last_action}"
+
+                    # Truncate if too long
+                    if len(full_text) > max_width:
+                        full_text = full_text[:max_width-3] + "..."
+
+                    stdscr.addstr(action_y, 2, full_text, curses.A_BOLD | curses.color_pair(5))
 
         # ============ COMMAND INPUT ============
         input_y = height - 3
