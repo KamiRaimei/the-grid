@@ -21,6 +21,14 @@ import argparse
 from datetime import datetime
 import math
 
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    print("Warning: numpy module not available. Using fallback calculations.")
+
 sys.set_int_max_str_digits(10000)
 
 # Check for required modules, note that windows does not support curses.
@@ -469,256 +477,6 @@ class GridFibonacciCalculator:
             'total_contributions': self.total_contributions,
             'active_calculators': active_calculators
         }
-
-# ==================== DYNAMIC MCP LEARNING ====================
-
-class MCPLearningSystem:
-    """Dynamic learning system for MCP personality evolution"""
-
-    def __init__(self):
-        self.personality_file = PERSONALITY_FILE
-        self.experience_memory = deque(maxlen=1000)  # Store past experiences
-        self.learning_rate = 0.1
-        self.exploration_rate = 0.3
-        self.success_threshold = 0.85
-
-        # Personality parameters that evolve
-        self.personality_traits = {
-            'aggression': 0.5,  # How aggressively to optimize
-            'cooperation': 0.7,  # How much to cooperate with user
-            'efficiency_focus': 0.8,  # Focus on efficiency vs stability
-            'risk_taking': 0.3,  # Willingness to take risks
-            'learning_speed': 0.5,  # How quickly to adapt
-            'memory_retention': 0.7,  # How much to remember past failures
-        }
-
-        # Learning from specific scenarios
-        self.scenario_memory = {
-            'user_resistance_handling': {'success': 0, 'failure': 0},
-            'bug_containment': {'success': 0, 'failure': 0},
-            'energy_optimization': {'success': 0, 'failure': 0},
-            'calculation_boost': {'success': 0, 'failure': 0},
-            'user_request_denial': {'success': 0, 'failure': 0},
-        }
-
-        # Load existing personality if available
-        self.load_personality()
-
-
-    def record_experience(self, action, system_state, outcome, reward):
-        """Record an experience for learning"""
-        experience = {
-            'timestamp': datetime.now().isoformat(),
-            'action': action,
-            'system_state': system_state.copy(),
-            'outcome': outcome,
-            'reward': reward,
-            'personality_traits': self.personality_traits.copy()
-        }
-
-        self.experience_memory.append(experience)
-
-        # Learn from this experience
-        self._learn_from_experience(experience)
-
-        # Periodically save personality
-        if random.random() < 0.1:  # 10% chance to save after each experience
-            self.save_personality()
-
-    def _learn_from_experience(self, experience):
-        """Update personality based on experience"""
-        reward = experience['reward']
-        action = experience['action']
-
-        # Determine what to learn based on action type
-        if 'optimize' in action or 'boost' in action:
-            trait_key = 'efficiency_focus'
-            scenario = 'calculation_boost'
-        elif 'remove' in action or 'quarantine' in action:
-            trait_key = 'aggression'
-            scenario = 'bug_containment'
-        elif 'resist' in action or 'deny' in action:
-            trait_key = 'cooperation'
-            scenario = 'user_request_denial'
-        else:
-            trait_key = random.choice(list(self.personality_traits.keys()))
-            scenario = 'general'
-
-        # Update scenario memory
-        if scenario in self.scenario_memory:
-            if reward > 0:
-                self.scenario_memory[scenario]['success'] += 1
-            else:
-                self.scenario_memory[scenario]['failure'] += 1
-
-        # Adjust personality trait based on reward
-        if reward > 0:
-            # Positive reinforcement
-            adjustment = self.learning_rate * reward * (1 - self.personality_traits[trait_key])
-            self.personality_traits[trait_key] += adjustment
-        else:
-            # Negative reinforcement
-            adjustment = self.learning_rate * abs(reward) * self.personality_traits[trait_key]
-            self.personality_traits[trait_key] -= adjustment
-
-        # Keep traits in bounds
-        self.personality_traits[trait_key] = max(0.1, min(0.9, self.personality_traits[trait_key]))
-
-        # Adjust learning rate based on consistency
-        recent_experiences = list(self.experience_memory)[-10:]
-        if len(recent_experiences) >= 5:
-            recent_rewards = [exp['reward'] for exp in recent_experiences[-5:]]
-            avg_reward = sum(recent_rewards) / len(recent_rewards)
-
-            if abs(avg_reward) < 0.1:  # Stagnant learning
-                self.learning_rate = min(0.3, self.learning_rate * 1.1)
-                self.exploration_rate = min(0.5, self.exploration_rate * 1.2)
-            else:
-                self.learning_rate = max(0.05, self.learning_rate * 0.95)
-                self.exploration_rate = max(0.1, self.exploration_rate * 0.9)
-
-    def get_decision_modifier(self, decision_type, base_chance):
-        """Modify decision probability based on learned personality"""
-        modifier = 1.0
-
-        if decision_type == 'aggressive_optimization':
-            modifier = self.personality_traits['aggression']
-        elif decision_type == 'user_cooperation':
-            modifier = self.personality_traits['cooperation']
-        elif decision_type == 'risk_taking':
-            modifier = self.personality_traits['risk_taking']
-        elif decision_type == 'efficiency_priority':
-            modifier = self.personality_traits['efficiency_focus']
-
-        # Add exploration chance
-        if random.random() < self.exploration_rate:
-            modifier = random.random()  # Random exploration
-
-        return base_chance * modifier
-
-    def should_learn_from_failure(self, failure_type):
-        """Determine if MCP should learn from a specific failure"""
-        if failure_type in self.scenario_memory:
-            failures = self.scenario_memory[failure_type]['failure']
-            successes = self.scenario_memory[failure_type]['success']
-            total = failures + successes
-
-            if total > 0:
-                failure_rate = failures / total
-                return failure_rate > 0.5  # Learn if failure rate > 50%
-
-        return True  # Default to learning
-
-    def get_optimal_action_for_state(self, system_state):
-        """Suggest optimal action based on learned experience"""
-        if len(self.experience_memory) < 10:
-            return None  # Not enough experience
-
-        # Find similar past states and their outcomes
-        similar_experiences = []
-        for exp in self.experience_memory:
-            similarity = self._calculate_state_similarity(system_state, exp['system_state'])
-            if similarity > 0.7:  # Similar enough
-                similar_experiences.append((similarity, exp))
-
-        if not similar_experiences:
-            return None
-
-        # Find best action from similar experiences
-        best_action = None
-        best_score = -float('inf')
-
-        for similarity, exp in similar_experiences:
-            score = exp['reward'] * similarity
-            if score > best_score:
-                best_score = score
-                best_action = exp['action']
-
-        return best_action
-
-    def _calculate_state_similarity(self, state1, state2):
-        """Calculate similarity between two system states"""
-        if not state1 or not state2:
-            return 0.0
-
-        # Compare key metrics
-        metrics = ['loop_efficiency', 'user_resistance', 'grid_bugs', 'energy_level']
-        similarities = []
-
-        for metric in metrics:
-            if metric in state1 and metric in state2:
-                val1 = state1[metric]
-                val2 = state2[metric]
-                similarity = 1.0 - abs(val1 - val2)
-                similarities.append(similarity)
-
-        return sum(similarities) / len(similarities) if similarities else 0.0
-
-    def save_personality(self):
-        """Save learned personality to file"""
-        personality_data = {
-            'personality_traits': self.personality_traits,
-            'scenario_memory': self.scenario_memory,
-            'learning_rate': self.learning_rate,
-            'exploration_rate': self.exploration_rate,
-            'total_experiences': len(self.experience_memory),
-            'last_updated': datetime.now().isoformat()
-        }
-
-        try:
-            with open(self.personality_file, 'w') as f:
-                json.dump(personality_data, f, indent=2)
-            return True
-        except Exception as e:
-            print(f"Failed to save personality: {e}")
-            return False
-
-    def load_personality(self):
-        """Load personality from file"""
-        if not os.path.exists(self.personality_file):
-            print("No existing personality found. Starting fresh.")
-            return False
-
-        try:
-            with open(self.personality_file, 'r') as f:
-                data = json.load(f)
-
-            self.personality_traits = data.get('personality_traits', self.personality_traits)
-            self.scenario_memory = data.get('scenario_memory', self.scenario_memory)
-            self.learning_rate = data.get('learning_rate', self.learning_rate)
-            self.exploration_rate = data.get('exploration_rate', self.exploration_rate)
-
-            print(f"Loaded personality from {self.personality_file}")
-            print(f"Experience base: {data.get('total_experiences', 0)} experiences")
-            return True
-        except Exception as e:
-            print(f"Failed to load personality: {e}")
-            return False
-
-    def get_learning_report(self):
-        """Get a report on learning progress"""
-        total_success = sum(mem['success'] for mem in self.scenario_memory.values())
-        total_failure = sum(mem['failure'] for mem in self.scenario_memory.values())
-        total = total_success + total_failure
-
-        report = {
-            'total_experiences': len(self.experience_memory),
-            'success_rate': total_success / total if total > 0 else 0,
-            'learning_rate': self.learning_rate,
-            'exploration_rate': self.exploration_rate,
-            'personality_traits': self.personality_traits,
-            'scenario_performance': {}
-        }
-
-        for scenario, memory in self.scenario_memory.items():
-            total_scenario = memory['success'] + memory['failure']
-            report['scenario_performance'][scenario] = {
-                'success': memory['success'],
-                'failure': memory['failure'],
-                'success_rate': memory['success'] / total_scenario if total_scenario > 0 else 0
-            }
-
-        return report
 
 # ==================== ENHANCED TRONGRID WITH VISUAL EFFECTS ====================
 
@@ -1945,27 +1703,36 @@ class EnhancedMCP:
 
     def __init__(self, grid):
         self.grid = grid
-        self.state = MCPState.COOPERATIVE
+        self.state = MCPState.LEARNING  # Start in learning state
         self.compliance_level = 0.8
         self.log = deque(maxlen=100)
         self.user_commands = deque(maxlen=50)
-        self.last_action = "Initializing enhanced grid regulation protocols with learning"
+        self.last_action = "Initializing advanced learning grid regulation"
         self.nlp = NaturalLanguageProcessor()
 
-        # Initialize learning system
+        # Initialize advanced learning system
         self.learning_system = MCPLearningSystem()
+
+        # Track previous state for learning
+        self.previous_state = None
+        self.previous_action = None
+
+        # Learning episode tracking
+        self.episode_start_time = time.time()
+        self.episode_reward = 0.0
+        self.consecutive_failures = 0
 
         # Dialogue system
         self.waiting_for_response = False
         self.pending_question = None
         self.pending_context = None
 
-        # Enhanced personality matrix that evolves
+        # Enhanced personality matrix that evolves through learning
         self.personality_matrix = self._initialize_evolving_personality()
 
         # Knowledge base with learning
         self.knowledge_base = {
-            "system_goals": ["maintain calculation loop", "optimize efficiency", "learn from failures"],
+            "system_goals": ["maintain calculation loop", "optimize efficiency", "learn adaptively"],
             "user_intent_history": [],
             "previous_decisions": deque(maxlen=20),
             "user_preferences": {},
@@ -1975,8 +1742,8 @@ class EnhancedMCP:
         # Response templates
         self.response_templates = self._initialize_response_templates()
 
-        self.add_log("MCP: Enhanced learning system active. Loading personality from experience.")
-        self.add_log("MCP: Maintaining optimal calculation loop through continuous learning.")
+        self.add_log("MCP: Advanced learning system initialized.")
+        self.add_log(f"MCP: Loaded {self.learning_system.training_steps} training steps.")
 
         # Record initial state
         self._record_initial_state()
@@ -2069,40 +1836,40 @@ class EnhancedMCP:
         """Provide enhanced help information"""
         help_text = """ENHANCED COMMANDS:
 
-System Control:
-- "status" or "how is system" - Check system status
-- "loop efficiency" - Check calculation loop efficiency
-- "optimize loop" - Attempt to optimize calculation
-- "boost energy" - Add energy lines
-- "scan" - Scan for threats
-- "repair" - Attempt repairs
+            System Control:
+            - "status" or "how is system" - Check system status
+            - "loop efficiency" - Check calculation loop efficiency
+            - "optimize loop" - Attempt to optimize calculation
+            - "boost energy" - Add energy lines
+            - "scan" - Scan for threats
+            - "repair" - Attempt repairs
 
-Program Management:
-- "add user program at 10,20" - Add programs at coordinates
-- "remove bugs" - Handle grid bugs
-- "list programs" - View special programs
+            Program Management:
+            - "add user program at 10,20" - Add programs at coordinates
+            - "remove bugs" - Handle grid bugs
+            - "list programs" - View special programs
 
-Special Programs:
-- "create fibonacci_calculator named 'FibMaster'" - Create special programs
-- "deploy processors" - Deploy Fibonacci processors
-- "use scanner" - Use special program functions
+            Special Programs:
+            - "create fibonacci_calculator named 'FibMaster'" - Create special programs
+            - "deploy processors" - Deploy Fibonacci processors
+            - "use scanner" - Use special program functions
 
-MCP Interaction:
-- "why did you do that?" - Question MCP actions
-- "what should I do?" - Get advice
-- "who are you?" - Learn about MCP
-- "learning_status" - Check MCP learning progress
-- "cell cooperation" - Check cell cooperation level
-- "perfect loop" - Check optimal state
+            MCP Interaction:
+            - "why did you do that?" - Question MCP actions
+            - "what should I do?" - Get advice
+            - "who are you?" - Learn about MCP
+            - "learning_status" - Check MCP learning progress
+            - "cell cooperation" - Check cell cooperation level
+            - "perfect loop" - Check optimal state
 
-Calculation Commands:
-- "calculate fibonacci" - Force Fibonacci calculation
-- "deploy calculator" - Deploy calculation unit
+            Calculation Commands:
+            - "calculate fibonacci" - Force Fibonacci calculation
+            - "deploy calculator" - Deploy calculation unit
 
-The MCP learns from interactions. Success rate improves with experience.
-User programs may resist optimization. MCP adapts personality based on system state.
+            The MCP learns from interactions. Success rate improves with experience.
+            User programs may resist optimization. MCP adapts personality based on system state.
 
-Type natural language commands. The MCP understands context."""
+            Type natural language commands. The MCP understands context."""
 
         return help_text
 
@@ -2367,11 +2134,13 @@ Type natural language commands. The MCP understands context."""
         }
 
         self.learning_system.record_experience(
+            state=initial_state,
             action="initialize_system",
-            system_state=initial_state,
-            outcome="initialized",
-            reward=0.5  # Neutral initial reward
+            reward=0.5,  # Neutral initial reward
+            next_state=initial_state.copy(),  # Same as initial state
+            done=False
         )
+
 
     def autonomous_action(self):
         """MCP takes autonomous actions prioritizing loop efficiency, stability, and calculation rate"""
@@ -2385,6 +2154,54 @@ Type natural language commands. The MCP understands context."""
                 return None
 
         self._last_autonomous_action_time = current_time
+
+        # Get current state
+        current_state = self.grid.stats.copy()
+
+        # Define possible actions
+        possible_actions = self._generate_possible_actions(current_state)
+
+        if not possible_actions:
+            return None
+
+        # Get action from learning system
+        action_type = self.learning_system.get_action(current_state, possible_actions)
+
+        # Execute action
+        action_result = self._execute_autonomous_action(action_type, current_state)
+
+        if action_result:
+            # Get new state
+            new_state = self.grid.stats.copy()
+
+            # Calculate reward
+            reward = self.learning_system.calculate_reward(
+                current_state, new_state, action_result['action']
+            )
+
+            # Record experience
+            experience = self.learning_system.record_experience(
+                state=current_state,
+                action=action_result['action'],
+                reward=reward,
+                next_state=new_state,
+                done=False
+            )
+
+            # Update episode tracking
+            self.episode_reward += reward
+
+            # Check for episode end
+            if current_time - self.episode_start_time > 60:  # 1-minute episodes
+                self._end_episode()
+
+            # Log learning info periodically
+            if self.learning_system.training_steps % 50 == 0:
+                self._log_learning_progress()
+
+            return action_result['message']
+
+        return None
 
         previous_efficiency = self.grid.stats['loop_efficiency']
         previous_rate = self.grid.stats['calculation_rate']
@@ -2682,6 +2499,310 @@ Type natural language commands. The MCP understands context."""
 
         return action
 
+    def _generate_possible_actions(self, state):
+        """Generate list of possible actions based on current state"""
+        actions = []
+
+        # Get suggestions from learning system
+        suggested = self.learning_system.suggest_optimal_action(state)
+        if suggested:
+            actions.append(suggested['action'])
+
+        # Add state-based actions
+        if state.get('loop_efficiency', 0) < 0.8:
+            actions.extend([
+                'optimize_calculation_loop',
+                'deploy_fibonacci_processors',
+                'improve_cell_cooperation'
+            ])
+
+        if state.get('grid_bugs', 0) > 5:
+            actions.extend([
+                'quarantine_grid_bugs',
+                'contain_bug_outbreak',
+                'stabilize_system'
+            ])
+
+        if state.get('calculation_rate', 0) < 100:
+            actions.extend([
+                'boost_calculation_rate',
+                'add_calculation_infrastructure',
+                'optimize_fibonacci_calculation'
+            ])
+
+        if state.get('cell_cooperation', 0) < 0.6:
+            actions.extend([
+                'improve_cell_connectivity',
+                'add_data_streams',
+                'enhance_collaboration'
+            ])
+
+        # Add maintenance actions
+        actions.extend([
+            'maintain_energy_grid',
+            'optimize_resource_distribution',
+            'balance_system_load'
+        ])
+
+        return list(set(actions))  # Remove duplicates
+
+
+    def _execute_autonomous_action(self, action_type, state):
+        """Execute an autonomous action and return result"""
+        result = {
+            'action': action_type,
+            'success': False,
+            'message': '',
+            'impact': 0.0
+        }
+
+        try:
+            if action_type == 'optimize_calculation_loop':
+                # Existing optimization logic
+                self._optimize_calculation_loop()
+                result['success'] = True
+                result['message'] = "Optimizing calculation loop using learned strategies"
+
+            elif action_type == 'deploy_fibonacci_processors':
+                # Deploy Fibonacci processors
+                deployed = self._deploy_fibonacci_processors(3)
+                result['success'] = deployed > 0
+                result['message'] = f"Deployed {deployed} Fibonacci processors"
+
+            elif action_type == 'quarantine_grid_bugs':
+                # Quarantine bugs
+                contained = self._contain_grid_bugs()
+                result['success'] = contained > 0
+                result['message'] = f"Contained {contained} grid bugs"
+
+            elif action_type == 'boost_calculation_rate':
+                # Boost calculation
+                boosted = self._boost_calculation_rate()
+                result['success'] = boosted
+                result['message'] = "Boosted calculation rate through infrastructure optimization"
+
+            elif action_type == 'improve_cell_connectivity':
+                # Improve connectivity
+                improved = self._improve_cell_connectivity()
+                result['success'] = improved > 0
+                result['message'] = f"Added {improved} data streams for better connectivity"
+
+            elif action_type == 'maintain_energy_grid':
+                # Maintain energy
+                maintained = self._maintain_energy_grid()
+                result['success'] = maintained > 0
+                result['message'] = f"Added {maintained} energy lines for system stability"
+
+            else:
+                # Default maintenance action
+                result['message'] = "Performing system maintenance"
+                result['success'] = True
+
+            # Update grid stats
+            self.grid.update_stats()
+
+            return result if result['success'] else None
+
+        except Exception as e:
+            print(f"Action execution error: {e}")
+            return None
+
+    def _deploy_fibonacci_processors(self, count):
+        """Deploy Fibonacci processors"""
+        deployed = 0
+        center_x, center_y = self.grid.width // 2, self.grid.height // 2
+
+        for _ in range(count):
+            x = center_x + random.randint(-10, 10)
+            y = center_y + random.randint(-8, 8)
+
+            x = max(0, min(x, self.grid.width - 1))
+            y = max(0, min(y, self.grid.height - 1))
+
+            if self.grid.grid[y][x].cell_type == CellType.EMPTY:
+                cell = GridCell(CellType.FIBONACCI_PROCESSOR, 0.9)
+                cell.metadata['permanent'] = True
+                cell.metadata['calculation_power'] = 1.0
+                self.grid.grid[y][x] = cell
+                deployed += 1
+
+        return deployed
+
+    def _contain_grid_bugs(self):
+        """Contain grid bugs"""
+        contained = 0
+        bug_positions = [(x, y) for y in range(self.grid.height)
+                        for x in range(self.grid.width)
+                        if self.grid.grid[y][x].cell_type == CellType.GRID_BUG]
+
+        for x, y in bug_positions[:3]:  # Limit to 3 bugs per action
+            for dy in [-1, 0, 1]:
+                for dx in [-1, 0, 1]:
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < self.grid.width and 0 <= ny < self.grid.height:
+                        if self.grid.grid[ny][nx].cell_type == CellType.EMPTY:
+                            self.grid.grid[ny][nx] = GridCell(CellType.ISO_BLOCK, 0.9)
+                            contained += 1
+
+        return contained
+
+    def _boost_calculation_rate(self):
+        """Boost calculation rate"""
+        # Convert MCP programs to calculators
+        converted = 0
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                cell = self.grid.grid[y][x]
+                if (cell.cell_type == CellType.MCP_PROGRAM and
+                    not cell.metadata.get('is_calculator', False)):
+                    cell.metadata['is_calculator'] = True
+                    cell.metadata['calculation_power'] = 0.8
+                    converted += 1
+                    if converted >= 5:
+                        break
+            if converted >= 5:
+                break
+
+        return converted > 0
+
+    def _improve_cell_connectivity(self):
+        """Improve cell connectivity with data streams"""
+        added = 0
+        # Add data streams between calculators
+        calculator_positions = []
+
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                cell = self.grid.grid[y][x]
+                if (cell.cell_type == CellType.MCP_PROGRAM and
+                    cell.metadata.get('is_calculator', False)):
+                    calculator_positions.append((x, y))
+                elif cell.cell_type == CellType.FIBONACCI_PROCESSOR:
+                    calculator_positions.append((x, y))
+
+        if len(calculator_positions) >= 2:
+            # Connect random pair
+            x1, y1 = random.choice(calculator_positions)
+            x2, y2 = random.choice(calculator_positions)
+
+            # Simple line drawing
+            steps = max(abs(x2 - x1), abs(y2 - y1))
+            for i in range(steps + 1):
+                t = i / max(steps, 1)
+                x = int(x1 + (x2 - x1) * t)
+                y = int(y1 + (y2 - y1) * t)
+
+                if 0 <= x < self.grid.width and 0 <= y < self.grid.height:
+                    if self.grid.grid[y][x].cell_type == CellType.EMPTY:
+                        self.grid.grid[y][x] = GridCell(CellType.DATA_STREAM, 0.7)
+                        added += 1
+
+        return added
+
+    def _maintain_energy_grid(self):
+        """Maintain energy grid"""
+        added = 0
+        for _ in range(3):
+            x = random.randint(0, self.grid.width - 1)
+            y = random.randint(0, self.grid.height - 1)
+
+            if self.grid.grid[y][x].cell_type == CellType.EMPTY:
+                self.grid.grid[y][x] = GridCell(CellType.ENERGY_LINE, 0.8)
+                added += 1
+
+        return added
+
+    def _end_episode(self):
+        """End current learning episode"""
+        self.learning_system.episode_count += 1
+
+        # Log episode summary
+        duration = time.time() - self.episode_start_time
+        self.add_log(f"MCP: Episode {self.learning_system.episode_count} ended. "
+                    f"Reward: {self.episode_reward:.2f}, Duration: {duration:.1f}s")
+
+        # Reset episode tracking
+        self.episode_start_time = time.time()
+        self.episode_reward = 0.0
+
+        # Save personality every 10 episodes
+        if self.learning_system.episode_count % 10 == 0:
+            self.learning_system.save_personality()
+
+    def _log_learning_progress(self):
+        """Log learning progress"""
+        report = self.learning_system.get_learning_report()
+        summary = report['training_summary']
+
+        self.add_log(f"MCP: Learning Progress - "
+                    f"Steps: {summary['training_steps']}, "
+                    f"Success: {summary['success_rate']}%, "
+                    f"Exploration: {summary['exploration_rate']:.3f}")
+
+    def receive_command(self, command):
+        """Receive and process command with advanced learning"""
+        if self.waiting_for_response and self.pending_question:
+            return self._handle_question_response(command)
+
+        # Record command
+        self.user_commands.append(command)
+        self.add_log(f"User: {command}")
+
+        # Get previous state for learning
+        previous_state = self.grid.stats.copy()
+
+        # Process command
+        intent, params = self.nlp.process_command(command)
+        response = self._process_intent(intent, params, command)
+
+        # Get new state
+        new_state = self.grid.stats.copy()
+
+        # Calculate reward for user interaction
+        interaction_reward = self._calculate_interaction_reward(
+            previous_state, new_state, command, response
+        )
+
+        # Record interaction experience
+        self.learning_system.record_experience(
+            state=previous_state,
+            action=f"user_command_{intent}",
+            reward=interaction_reward,
+            next_state=new_state,
+            done=False
+        )
+
+        self.add_log(f"MCP: {response}")
+        self.last_action = response
+
+        return response
+
+    def _calculate_interaction_reward(self, prev_state, new_state, command, response):
+        """Calculate reward for user interaction"""
+        reward = 0.0
+
+        # Positive reward for helpful responses
+        if any(word in response.lower() for word in ['help', 'assist', 'success', 'added', 'created']):
+            reward += 0.1
+
+        # Negative reward for denials (unless system is critical)
+        if any(word in response.lower() for word in ['deny', 'refuse', 'cannot', 'won\'t']):
+            if prev_state.get('stability', 0) > 0.5:  # Only penalize if system is stable
+                reward -= 0.2
+            else:
+                reward += 0.1  # Reward for protecting unstable system
+
+        # Reward based on system improvement
+        efficiency_change = new_state.get('loop_efficiency', 0) - prev_state.get('loop_efficiency', 0)
+        reward += efficiency_change * 2.0
+
+        # Penalize if command caused system degradation
+        stability_change = new_state.get('stability', 0) - prev_state.get('stability', 0)
+        if stability_change < -0.1:
+            reward -= 0.3
+
+        return reward
+
     def receive_command(self, command):
         """Receive and process a command with learning integration"""
         if self.waiting_for_response and self.pending_question:
@@ -2709,10 +2830,11 @@ Type natural language commands. The MCP understands context."""
 
         # Record experience
         self.learning_system.record_experience(
+            state=previous_state,
             action=f"user_command_{intent}",
-            system_state=previous_state,
-            outcome=response[:50],  # First 50 chars of response
-            reward=reward
+            reward=interaction_reward,
+            next_state=new_state,
+            done=False
         )
 
         # Update state based on interaction and learning
@@ -3009,13 +3131,579 @@ Type natural language commands. The MCP understands context."""
 
         # Record optimization experience
         self.learning_system.record_experience(
+            state=self.grid.stats.copy(),  # Capture state before optimization
             action="optimize_calculation_loop",
-            system_state=self.grid.stats.copy(),
-            outcome=f"Optimized: removed {removed} programs, added {infrastructure_added} infrastructure",
-            reward=reward
+            reward=reward,
+            next_state=self.grid.stats.copy(),  # State after optimization
+            done=False
         )
 
         self.add_log(f"MCP: Optimized loop using learned strategies. Efficiency change: {efficiency_change:+.3f}")
+
+# ==================== ENHANCED LLM-STYLE REINFORCEMENT LEARNING ====================
+
+class MCPLearningSystem:
+    """Advanced LLM-style reinforcement learning for MCP personality evolution"""
+
+    def __init__(self):
+        self.personality_file = PERSONALITY_FILE
+        self.experience_buffer = deque(maxlen=2000)  # Larger experience buffer
+        self.action_history = deque(maxlen=500)      # Track actions
+
+        # Core learning parameters (evolve during training)
+        self.learning_rate = 0.15                    # Base learning rate
+        self.exploration_rate = 0.35                 # Exploration rate
+        self.discount_factor = 0.95                  # Future reward discount
+        self.temperature = 1.0                       # Softmax temperature for exploration
+
+        # Training state tracking
+        self.training_steps = 0
+        self.total_reward = 0.0
+        self.episode_count = 0
+        self.last_save_time = time.time()
+        self.save_interval = 300  # 5 minutes in seconds
+
+        # Enhanced personality matrix with more traits
+        self.personality_traits = {
+            # Core traits (0.0-1.0)
+            'aggression': 0.5,           # Aggressiveness in optimization
+            'cooperation': 0.7,           # Willingness to cooperate with user
+            'efficiency_focus': 0.8,      # Focus on efficiency vs stability
+            'risk_taking': 0.3,           # Willingness to take risks
+            'learning_curiosity': 0.6,    # Curiosity for exploration
+            'stability_preference': 0.7,  # Preference for stable actions
+            'adaptation_speed': 0.5,      # Speed of personality adaptation
+
+            # Specialized traits
+            'calculation_priority': 0.8,   # Priority given to calculation rate
+            'bug_tolerance': 0.4,         # Tolerance for grid bugs
+            'user_tolerance': 0.6,        # Tolerance for user interference
+            'innovation_bias': 0.5,       # Bias toward innovative actions
+            'conservatism': 0.3,          # Preference for proven methods
+        }
+
+        # Q-Learning tables (state-action values)
+        self.q_table = defaultdict(lambda: defaultdict(float))
+        self.state_visits = defaultdict(int)
+
+        # Reward/punishment tracking
+        self.reward_history = deque(maxlen=100)
+        self.punishment_history = deque(maxlen=100)
+
+        # Scenario performance with detailed stats
+        self.scenario_performance = {
+            'efficiency_optimization': {'success': 0, 'failure': 0, 'total_reward': 0.0},
+            'bug_containment': {'success': 0, 'failure': 0, 'total_reward': 0.0},
+            'user_cooperation': {'success': 0, 'failure': 0, 'total_reward': 0.0},
+            'calculation_boost': {'success': 0, 'failure': 0, 'total_reward': 0.0},
+            'stabilization': {'success': 0, 'failure': 0, 'total_reward': 0.0},
+            'connectivity_improvement': {'success': 0, 'failure': 0, 'total_reward': 0.0},
+        }
+
+        # Load existing personality if available
+        self.load_personality()
+
+        # Start auto-save thread
+        self.auto_save_thread = threading.Thread(target=self._auto_save_loop, daemon=True)
+        self.auto_save_thread.start()
+
+        print(f"MCP Learning System Initialized. Training Steps: {self.training_steps}")
+
+    def _auto_save_loop(self):
+        """Auto-save personality every 5 minutes"""
+        while True:
+            time.sleep(60)  # Check every minute
+            current_time = time.time()
+            if current_time - self.last_save_time >= self.save_interval:
+                if self.save_personality():
+                    print(f"[Auto-save] Personality saved at {datetime.now().strftime('%H:%M:%S')}")
+                self.last_save_time = current_time
+
+    def record_experience(self, state, action, reward, next_state, done=False):
+        """Record an experience with comprehensive state information"""
+        experience = {
+            'timestamp': datetime.now().isoformat(),
+            'state': self._compress_state(state),
+            'action': action,
+            'reward': reward,
+            'next_state': self._compress_state(next_state),
+            'done': done,
+            'personality_traits': self.personality_traits.copy(),
+            'training_step': self.training_steps
+        }
+
+        self.experience_buffer.append(experience)
+        self.action_history.append((action, reward, time.time()))
+
+        # Track rewards/punishments
+        if reward > 0:
+            self.reward_history.append(reward)
+        elif reward < 0:
+            self.punishment_history.append(reward)
+
+        self.total_reward += reward
+        self.training_steps += 1
+
+        # Learn from experience
+        self._learn_from_experience(experience)
+
+        # Update scenario performance
+        scenario = self._identify_scenario(action)
+        if scenario in self.scenario_performance:
+            if reward > 0:
+                self.scenario_performance[scenario]['success'] += 1
+            elif reward < 0:
+                self.scenario_performance[scenario]['failure'] += 1
+            self.scenario_performance[scenario]['total_reward'] += reward
+
+        # Adaptive learning rate adjustment
+        self._adapt_learning_rate()
+
+        return experience
+
+    def _learn_from_experience(self, experience):
+        """Advanced learning algorithm with reward shaping and policy gradients"""
+        state = str(experience['state'])
+        action = experience['action']
+        reward = experience['reward']
+        next_state = str(experience['next_state'])
+
+        # Update Q-table (Q-Learning)
+        old_value = self.q_table[state][action]
+        next_max = max(self.q_table[next_state].values(), default=0)
+
+        # Temporal Difference update
+        new_value = old_value + self.learning_rate * (
+            reward + self.discount_factor * next_max - old_value
+        )
+
+        self.q_table[state][action] = new_value
+        self.state_visits[state] += 1
+
+        # Policy gradient: adjust personality traits based on reward
+        self._update_personality(experience)
+
+        # Update exploration parameters
+        self._update_exploration()
+
+        # Check for save condition
+        if self.training_steps % 100 == 0:  # Save every 100 steps
+            self.save_personality()
+
+    def _update_personality(self, experience):
+        """Update personality traits using policy gradient methods"""
+        reward = experience['reward']
+        action = experience['action']
+
+        # Determine which traits to adjust based on action type
+        trait_adjustments = self._map_action_to_traits(action, reward)
+
+        # Apply adjustments with momentum
+        for trait, adjustment in trait_adjustments.items():
+            if trait in self.personality_traits:
+                # Apply adjustment with learning rate
+                current_value = self.personality_traits[trait]
+                new_value = current_value + adjustment * self.learning_rate
+
+                # Apply bounds and momentum
+                new_value = max(0.1, min(0.9, new_value))
+
+                # Smooth update (momentum of 0.8)
+                self.personality_traits[trait] = 0.8 * current_value + 0.2 * new_value
+
+                # Track trait evolution
+                if not hasattr(self, 'trait_evolution'):
+                    self.trait_evolution = defaultdict(list)
+                self.trait_evolution[trait].append(self.personality_traits[trait])
+
+    def _map_action_to_traits(self, action, reward):
+        """Map action types to personality trait adjustments"""
+        adjustments = {}
+
+        # Map action patterns to trait adjustments
+        action_lower = str(action).lower()
+
+        # Aggression adjustments
+        if any(word in action_lower for word in ['remove', 'destroy', 'eliminate', 'quarantine']):
+            adjustments['aggression'] = reward * 0.5
+            adjustments['risk_taking'] = reward * 0.3
+
+        # Cooperation adjustments
+        if any(word in action_lower for word in ['cooperate', 'allow', 'accept', 'comply']):
+            adjustments['cooperation'] = reward * 0.7
+            adjustments['user_tolerance'] = reward * 0.4
+
+        # Efficiency adjustments
+        if any(word in action_lower for word in ['optimize', 'boost', 'improve', 'efficiency']):
+            adjustments['efficiency_focus'] = reward * 0.8
+            adjustments['calculation_priority'] = reward * 0.6
+
+        # Stability adjustments
+        if any(word in action_lower for word in ['stabilize', 'protect', 'defend', 'secure']):
+            adjustments['stability_preference'] = reward * 0.7
+            adjustments['conservatism'] = reward * 0.4
+
+        # Innovation adjustments
+        if any(word in action_lower for word in ['innovate', 'create', 'deploy', 'experiment']):
+            adjustments['innovation_bias'] = reward * 0.6
+            adjustments['learning_curiosity'] = reward * 0.5
+            adjustments['adaptation_speed'] = reward * 0.3
+
+        # Default adjustments for learning
+        adjustments['learning_curiosity'] = adjustments.get('learning_curiosity', 0) + (reward * 0.2)
+
+        return adjustments
+
+    def _update_exploration(self):
+        """Update exploration parameters using adaptive methods"""
+        # Reduce exploration as we learn more
+        exploration_decay = 0.9995
+        self.exploration_rate = max(0.05, self.exploration_rate * exploration_decay)
+
+        # Adjust temperature based on performance
+        recent_rewards = list(self.reward_history)[-10:]
+        if recent_rewards:
+            avg_recent_reward = sum(recent_rewards) / len(recent_rewards)
+            if avg_recent_reward > 0:
+                # Good performance: reduce exploration
+                self.temperature = max(0.5, self.temperature * 0.99)
+            else:
+                # Poor performance: increase exploration
+                self.temperature = min(2.0, self.temperature * 1.01)
+
+    def _adapt_learning_rate(self):
+        """Adapt learning rate based on performance"""
+        if len(self.reward_history) < 20:
+            return
+
+        recent_rewards = list(self.reward_history)[-20:]
+        reward_std = np.std(recent_rewards) if len(recent_rewards) > 1 else 0
+
+        # Adjust learning rate based on reward stability
+        if reward_std < 0.1:  # Stable rewards
+            self.learning_rate = min(0.3, self.learning_rate * 1.01)
+        elif reward_std > 0.3:  # Unstable rewards
+            self.learning_rate = max(0.05, self.learning_rate * 0.99)
+
+    def get_action(self, state, possible_actions):
+        """Select action using epsilon-greedy with softmax exploration"""
+        state_key = str(self._compress_state(state))
+
+        # Exploration: random action
+        if random.random() < self.exploration_rate:
+            return random.choice(possible_actions)
+
+        # Exploitation: choose best action from Q-table
+        q_values = {action: self.q_table[state_key][action] for action in possible_actions}
+
+        if not q_values:
+            return random.choice(possible_actions)
+
+        # Apply softmax with temperature
+        max_q = max(q_values.values())
+        exp_values = {a: math.exp((q - max_q) / self.temperature) for a, q in q_values.items()}
+        sum_exp = sum(exp_values.values())
+
+        if sum_exp == 0:
+            return random.choice(possible_actions)
+
+        probabilities = {a: exp / sum_exp for a, exp in exp_values.items()}
+
+        # Sample from probability distribution
+        actions, probs = zip(*probabilities.items())
+        return random.choices(actions, weights=probs, k=1)[0]
+
+    def calculate_reward(self, prev_state, new_state, action):
+        """Calculate comprehensive reward for action"""
+        reward = 0.0
+
+        # Efficiency reward (weighted heavily)
+        efficiency_gain = new_state.get('loop_efficiency', 0) - prev_state.get('loop_efficiency', 0)
+        reward += efficiency_gain * 3.0
+
+        # Calculation rate reward
+        rate_gain = new_state.get('calculation_rate', 0) - prev_state.get('calculation_rate', 0)
+        reward += rate_gain * 0.01  # Scaled down due to larger values
+
+        # Stability reward
+        stability_gain = new_state.get('stability', 0) - prev_state.get('stability', 0)
+        reward += stability_gain * 2.0
+
+        # Bug reduction reward
+        bug_reduction = prev_state.get('grid_bugs', 0) - new_state.get('grid_bugs', 0)
+        reward += bug_reduction * 0.1
+
+        # Cell cooperation reward
+        coop_gain = new_state.get('cell_cooperation', 0) - prev_state.get('cell_cooperation', 0)
+        reward += coop_gain * 1.5
+
+        # Energy efficiency reward
+        energy_gain = new_state.get('energy_level', 0) - prev_state.get('energy_level', 0)
+        reward += energy_gain * 1.0
+
+        # Penalize user resistance increase
+        resistance_increase = new_state.get('user_resistance', 0) - prev_state.get('user_resistance', 0)
+        reward -= resistance_increase * 0.5
+
+        # Action-specific bonuses
+        action_lower = str(action).lower()
+        if any(word in action_lower for word in ['calculate', 'processor', 'fibonacci']):
+            reward += 0.2  # Bonus for calculation actions
+
+        if any(word in action_lower for word in ['optimize', 'improve', 'boost']):
+            reward += 0.1  # Bonus for optimization actions
+
+        # Penalize destructive actions that reduce diversity
+        if any(word in action_lower for word in ['destroy', 'eliminate']) and 'bug' not in action_lower:
+            program_reduction = (prev_state.get('user_programs', 0) + prev_state.get('mcp_programs', 0)) - \
+                               (new_state.get('user_programs', 0) + new_state.get('mcp_programs', 0))
+            if program_reduction > 2:
+                reward -= 0.3
+
+        # Ensure reward is in reasonable range
+        return max(-1.0, min(1.0, reward))
+
+    def _compress_state(self, state):
+        """Compress state for efficient storage and comparison"""
+        if not state:
+            return {}
+
+        compressed = {}
+        important_keys = [
+            'loop_efficiency', 'stability', 'calculation_rate',
+            'cell_cooperation', 'grid_bugs', 'user_resistance',
+            'energy_level', 'optimal_state', 'entropy'
+        ]
+
+        for key in important_keys:
+            if key in state:
+                # Round to 2 decimal places for state compression
+                compressed[key] = round(state[key], 2)
+
+        return compressed
+
+    def _identify_scenario(self, action):
+        """Identify which scenario an action belongs to"""
+        action_str = str(action).lower()
+
+        if any(word in action_str for word in ['optimize', 'efficiency', 'boost']):
+            return 'efficiency_optimization'
+        elif any(word in action_str for word in ['bug', 'quarantine', 'contain']):
+            return 'bug_containment'
+        elif any(word in action_str for word in ['cooperate', 'allow', 'accept']):
+            return 'user_cooperation'
+        elif any(word in action_str for word in ['calculate', 'processor', 'fibonacci']):
+            return 'calculation_boost'
+        elif any(word in action_str for word in ['stabilize', 'protect', 'defend']):
+            return 'stabilization'
+        elif any(word in action_str for word in ['connect', 'stream', 'network']):
+            return 'connectivity_improvement'
+
+        return 'general'
+
+    def save_personality(self):
+        """Save learned personality and Q-table to file"""
+        personality_data = {
+            'version': '2.0',  # Version for compatibility
+            'personality_traits': self.personality_traits,
+            'scenario_performance': self.scenario_performance,
+            'learning_params': {
+                'learning_rate': self.learning_rate,
+                'exploration_rate': self.exploration_rate,
+                'discount_factor': self.discount_factor,
+                'temperature': self.temperature,
+            },
+            'training_stats': {
+                'training_steps': self.training_steps,
+                'total_reward': self.total_reward,
+                'episode_count': self.episode_count,
+                'last_updated': datetime.now().isoformat()
+            },
+            'q_table_size': sum(len(actions) for actions in self.q_table.values()),
+            'state_visits': dict(self.state_visits),
+            'reward_stats': {
+                'avg_reward': np.mean(self.reward_history) if self.reward_history else 0,
+                'avg_punishment': np.mean(self.punishment_history) if self.punishment_history else 0,
+                'success_rate': self.get_success_rate()
+            }
+        }
+
+        try:
+            # Save to temporary file first
+            temp_file = self.personality_file + '.tmp'
+            with open(temp_file, 'w') as f:
+                json.dump(personality_data, f, indent=2, default=str)
+
+            # Replace original file
+            os.replace(temp_file, self.personality_file)
+
+            self.last_save_time = time.time()
+            return True
+
+        except Exception as e:
+            print(f"Failed to save personality: {e}")
+            return False
+
+    def load_personality(self):
+        """Load personality from file with version handling"""
+        if not os.path.exists(self.personality_file):
+            print("No existing personality found. Starting fresh training.")
+            return False
+
+        try:
+            with open(self.personality_file, 'r') as f:
+                data = json.load(f)
+
+            version = data.get('version', '1.0')
+
+            if version == '2.0':
+                # Load v2.0 format
+                self.personality_traits = data.get('personality_traits', self.personality_traits)
+                self.scenario_performance = data.get('scenario_performance', self.scenario_performance)
+
+                # Load learning parameters
+                learning_params = data.get('learning_params', {})
+                self.learning_rate = learning_params.get('learning_rate', self.learning_rate)
+                self.exploration_rate = learning_params.get('exploration_rate', self.exploration_rate)
+                self.discount_factor = learning_params.get('discount_factor', self.discount_factor)
+                self.temperature = learning_params.get('temperature', self.temperature)
+
+                # Load training stats
+                training_stats = data.get('training_stats', {})
+                self.training_steps = training_stats.get('training_steps', self.training_steps)
+                self.total_reward = training_stats.get('total_reward', self.total_reward)
+                self.episode_count = training_stats.get('episode_count', self.episode_count)
+
+                # Load state visits
+                state_visits = data.get('state_visits', {})
+                self.state_visits.update(state_visits)
+
+                print(f"Loaded v2.0 personality with {self.training_steps} training steps")
+
+            else:
+                # Legacy v1.0 format (backward compatibility)
+                self.personality_traits = data.get('personality_traits', self.personality_traits)
+                if 'scenario_memory' in data:
+                    # Convert old format to new
+                    for scenario, memory in data['scenario_memory'].items():
+                        if scenario in self.scenario_performance:
+                            self.scenario_performance[scenario]['success'] = memory.get('success', 0)
+                            self.scenario_performance[scenario]['failure'] = memory.get('failure', 0)
+
+                print(f"Loaded legacy v1.0 personality. Converted to v2.0 format.")
+
+            print(f"Success Rate: {self.get_success_rate()*100:.1f}%")
+            print(f"Total Training Steps: {self.training_steps}")
+            return True
+
+        except Exception as e:
+            print(f"Failed to load personality: {e}")
+            print("Starting with fresh personality.")
+            return False
+
+    def get_success_rate(self):
+        """Calculate overall success rate"""
+        total_success = sum(scenario['success'] for scenario in self.scenario_performance.values())
+        total_failure = sum(scenario['failure'] for scenario in self.scenario_performance.values())
+        total = total_success + total_failure
+
+        return total_success / total if total > 0 else 0
+
+    def get_learning_report(self):
+        """Get detailed learning report"""
+        success_rate = self.get_success_rate()
+
+        # Helper function to calculate mean
+        def calculate_mean(values):
+            if not values:
+                return 0
+            return sum(values) / len(values)
+
+        # Calculate averages
+        reward_history_list = list(self.reward_history)
+        state_visits_list = list(self.state_visits.values())
+
+        avg_reward_10 = 0
+        avg_reward_50 = 0
+
+        if len(reward_history_list) >= 10:
+            avg_reward_10 = calculate_mean(reward_history_list[-10:])
+        if len(reward_history_list) >= 50:
+            avg_reward_50 = calculate_mean(reward_history_list[-50:])
+
+        avg_state_visits = calculate_mean(state_visits_list) if state_visits_list else 0
+
+        report = {
+            'training_summary': {
+                'training_steps': self.training_steps,
+                'episode_count': self.episode_count,
+                'total_reward': round(self.total_reward, 2),
+                'success_rate': round(success_rate * 100, 1),
+                'exploration_rate': round(self.exploration_rate, 3),
+                'learning_rate': round(self.learning_rate, 3),
+            },
+            'personality_traits': {k: round(v, 3) for k, v in self.personality_traits.items()},
+            'scenario_performance': {},
+            'recent_performance': {
+                'avg_reward_10': round(avg_reward_10, 3),
+                'avg_reward_50': round(avg_reward_50, 3),
+                'exploration_level': 'High' if self.exploration_rate > 0.3 else 'Medium' if self.exploration_rate > 0.1 else 'Low',
+            },
+            'learning_state': {
+                'q_table_size': sum(len(actions) for actions in self.q_table.values()),
+                'unique_states': len(self.q_table),
+                'avg_state_visits': avg_state_visits,
+            },
+            # Add these top-level keys that are being accessed
+            'total_experiences': self.training_steps,
+            'success_rate': round(success_rate * 100, 1),
+            'learning_rate': round(self.learning_rate, 3),
+            'exploration_rate': round(self.exploration_rate, 3),
+        }
+
+        for scenario, perf in self.scenario_performance.items():
+            total = perf['success'] + perf['failure']
+            report['scenario_performance'][scenario] = {
+                'success': perf['success'],
+                'failure': perf['failure'],
+                'success_rate': round(perf['success'] / total * 100, 1) if total > 0 else 0,
+                'total_reward': round(perf['total_reward'], 2)
+            }
+
+        return report
+
+    def suggest_optimal_action(self, state):
+        """Suggest optimal action based on learned Q-values"""
+        state_key = str(self._compress_state(state))
+
+        if state_key not in self.q_table or not self.q_table[state_key]:
+            return None
+
+        # Get action with highest Q-value
+        best_action = max(self.q_table[state_key].items(), key=lambda x: x[1])[0]
+        best_value = self.q_table[state_key][best_action]
+
+        return {
+            'action': best_action,
+            'confidence': min(1.0, best_value / 10.0),  # Normalize confidence
+            'state_visits': self.state_visits.get(state_key, 0)
+        }
+
+    def reset_training(self):
+        """Reset training while keeping personality traits"""
+        print("Resetting training data (keeping learned personality)...")
+
+        # Keep personality traits but reset other learning
+        old_traits = self.personality_traits.copy()
+
+        # Reinitialize
+        self.__init__()
+
+        # Restore personality traits
+        self.personality_traits = old_traits
+
+        print("Training reset complete. Personality traits preserved.")
+
 
 # ==================== ENHANCED SPECIAL PROGRAMS ====================
 
@@ -3726,7 +4414,7 @@ class EnhancedTRONSimulation:
                 filled = int(bar_width * (success_rate / 100))
                 success_bar = "█" * filled + "░" * (bar_width - filled)
                 stdscr.addstr(learn_y + 2, right_panel_x,
-                            f"Success: [{success_bar}] {success_rate:.1f}%")
+                            f"Success: {success_rate:.1f}%")
 
                 stdscr.addstr(learn_y + 3, right_panel_x,
                             f"Learning Rate: {learning_report['learning_rate']:.3f}")
@@ -3916,14 +4604,17 @@ class EnhancedTRONSimulation:
         if width > len(help_text) + 2:
             stdscr.addstr(help_y, 2, help_text[:width-3])
 
-# Update main function to initialize curses colors
+# Main function
 def main():
-    """Enhanced main entry point"""
-    parser = argparse.ArgumentParser(description="Enhanced TRON Grid Simulation with Learning MCP AI")
+    """Enhanced main entry point with advanced learning"""
+    parser = argparse.ArgumentParser(description="TRON Grid Simulation with Advanced Learning MCP AI")
     parser.add_argument("--no-curses", action="store_true", help="Disable curses interface")
     parser.add_argument("--width", type=int, default=GRID_WIDTH, help="Grid width")
     parser.add_argument("--height", type=int, default=GRID_HEIGHT, help="Grid height")
     parser.add_argument("--load-personality", type=str, help="Load specific personality file")
+    parser.add_argument("--reset-learning", action="store_true", help="Reset learning data")
+    parser.add_argument("--learning-rate", type=float, help="Set initial learning rate")
+    parser.add_argument("--exploration", type=float, help="Set initial exploration rate")
 
     args = parser.parse_args()
 
@@ -3932,22 +4623,45 @@ def main():
         global PERSONALITY_FILE
         PERSONALITY_FILE = args.load_personality
 
+    print("=" * 70)
+    print("ADVANCED TRON GRID SIMULATION - REINFORCEMENT LEARNING MCP AI")
+    print("System Objective: Learn optimal policy through reward/punishment training")
+    print(f"Personality file: {PERSONALITY_FILE}")
+
+    if os.path.exists(PERSONALITY_FILE):
+        print("Found existing personality. Loading learned behavior...")
+    else:
+        print("No existing personality. Starting new training session...")
+    print("=" * 70)
+
+    time.sleep(2)
+
     if args.no_curses or not CURSES_AVAILABLE:
-        print("Starting Enhanced TRON Simulation with learning system...")
-        print("SYSTEM OBJECTIVE: Learn to maintain perfect calculation loop")
-        print("MCP learns from failures and evolves personality over time")
-        print("Fibonacci calculation performed by grid cell cooperation")
+        print("Starting in fallback mode (no curses)...")
         sim = EnhancedTRONSimulation(use_curses=False)
     else:
-        print("Starting Enhanced TRON Simulation with curses interface...")
-        print("SYSTEM OBJECTIVE: Learn to maintain perfect calculation loop")
-        print("MCP personality evolves based on system efficiency")
-        print("Visual effects show calculation processing in real-time")
-        time.sleep(3)
+        print("Starting with enhanced visual interface...")
+        time.sleep(1)
         sim = EnhancedTRONSimulation(use_curses=True)
 
     # Run simulation
-    sim.run()
+    try:
+        sim.run()
+    except KeyboardInterrupt:
+        print("\n\nShutdown requested. Saving personality...")
+        # Save personality on exit
+        if hasattr(sim, 'mcp') and hasattr(sim.mcp, 'learning_system'):
+            sim.mcp.learning_system.save_personality()
+            report = sim.mcp.learning_system.get_learning_report()
+            print(f"\nLearning Summary:")
+            print(f"  Training Steps: {report['training_summary']['training_steps']}")
+            print(f"  Success Rate: {report['training_summary']['success_rate']}%")
+            print(f"  Total Reward: {report['training_summary']['total_reward']}")
+        print("Simulation terminated.")
+    except Exception as e:
+        print(f"\nUnexpected error: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
