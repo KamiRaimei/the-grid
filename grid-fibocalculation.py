@@ -260,7 +260,7 @@ class GridFibonacciCalculator:
         })
 
         # When accumulator reaches threshold, advance Fibonacci sequence
-        calculation_threshold = 100  # Adjust for calculation speed
+        calculation_threshold = 1000  # Adjust for calculation speed
 
         steps_taken = 0
         while self.calculation_accumulator >= calculation_threshold:
@@ -901,7 +901,6 @@ class TRONGrid:
         calc_stats = self.fibonacci_calculator.get_calculation_stats()
         self.stats['calculation_rate'] = calc_stats['calculation_rate']
 
-        # Original evolution logic continues...
         new_grid = [[GridCell(CellType.EMPTY, 0.0) for _ in range(self.width)]
                     for _ in range(self.height)]
 
@@ -3341,7 +3340,7 @@ class EnhancedTRONSimulation:
                                     f"  Eff: {calc_stats['efficiency_score']:.2f}")
                 if calc_y + 3 + len(fib_lines) < height - 5:
                     stdscr.addstr(calc_y + 3 + len(fib_lines), right_panel_x,
-                                    f"  Acc: {calc_stats['accumulator']:.2f}/5.0")
+                                    f"  Acc: {calc_stats['accumulator']:.2f}/1000.0")
             # MCP State
             mcp_y = calc_y + 6
             if mcp_y < height - 10:
@@ -3458,7 +3457,7 @@ class EnhancedTRONSimulation:
                 (left_panel_y + 1, f"  Current: {calc_stats['current_fibonacci']:,}"),
                 (left_panel_y + 2, f"  Rate: {calc_stats['calculation_rate']:.2f}/s"),
                 (left_panel_y + 3, f"  Efficiency: {calc_stats['efficiency_score']:.2f}"),
-                (left_panel_y + 4, f"  Accumulator: {calc_stats['accumulator']:.2f}/5.0"),
+                (left_panel_y + 4, f"  Accumulator: {calc_stats['accumulator']:.2f}/1000.0"),
                 (left_panel_y + 5, f"  Cell Cooperation: {self.grid.stats['cell_cooperation']:.2f}"),
             ]
 
