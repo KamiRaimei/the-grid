@@ -4406,10 +4406,8 @@ class EnhancedTRONSimulation:
 
     def _fallback_main(self):
         """Fallback main loop without curses"""
-        print("ENHANCED TRON GRID SIMULATION - LEARNING MCP AI")
+        print("GRID SIMULATION - FIBONACCI SEQUNENCE")
         print("System Objective: Maintain Perfect Calculation Loop Through Learning")
-        print("Type natural language commands. The MCP understands and learns.")
-        print("Type 'help' for guidance, 'exit' to quit")
         print("=" * 70)
 
         try:
@@ -4603,7 +4601,7 @@ class EnhancedTRONSimulation:
         """Enhanced fallback display with learning and calculation info"""
         os.system('clear' if os.name == 'posix' else 'cls')
 
-        print("ENHANCED TRON GRID SIMULATION - LEARNING MCP AI")
+        print("GRID SIMULATION - FIBONACCI SEQUENCE")
         print(f"Generation: {self.grid.generation:06d} | Status: {self.grid.system_status.value}")
         print("System Objective: Maintain Perfect Calculation Loop Through Learning")
         print("=" * 70)
@@ -4730,7 +4728,7 @@ class EnhancedTRONSimulation:
         stdscr.clear()
 
         # Title with learning indicator
-        title = "ENHANCED TRON GRID - LEARNING MCP AI"
+        title = "GRID SIMULATION - FIBONACCI SEQUENCE"
         if self.mcp.state == MCPState.LEARNING:
             title += " [LEARNING MODE]"
         stdscr.addstr(0, max(0, (width - len(title)) // 2), title, curses.A_BOLD)
@@ -5069,7 +5067,7 @@ class EnhancedTRONSimulation:
 # Main function
 def main():
     """Enhanced main entry point with advanced learning"""
-    parser = argparse.ArgumentParser(description="TRON Grid Simulation with Advanced Learning MCP AI")
+    parser = argparse.ArgumentParser(description="Grid Simulation - Fibonacci Sequence")
     parser.add_argument("--no-curses", action="store_true", help="Disable curses interface")
     parser.add_argument("--width", type=int, default=GRID_WIDTH, help="Grid width")
     parser.add_argument("--height", type=int, default=GRID_HEIGHT, help="Grid height")
@@ -5086,7 +5084,7 @@ def main():
         PERSONALITY_FILE = args.load_personality
 
     print("=" * 70)
-    print("ADVANCED TRON GRID SIMULATION - REINFORCEMENT LEARNING MCP AI")
+    print("GRID SIMULATION - REINFORCEMENT LEARNING MCP AI")
     print("System Objective: Learn optimal policy through reward/punishment training")
     print(f"Personality file: {PERSONALITY_FILE}")
 
