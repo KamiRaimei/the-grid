@@ -2932,8 +2932,8 @@ class EnhancedMCP:
         self.compliance_level = self.personality_matrix[self.state]["compliance"]
 
         # Occasionally show learning progress
-        if random.random() < 0.05 and self.learning_system.experience_memory:
-            exp_count = len(self.learning_system.experience_memory)
+        if random.random() < 0.05 and self.learning_system.experience_buffer:
+            exp_count = len(self.learning_system.experience_buffer)
             self.add_log(f"MCP: Learning database: {exp_count} experiences accumulated.")
 
     def _process_intent(self, intent, params, original_command):
