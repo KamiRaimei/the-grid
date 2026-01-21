@@ -4,4 +4,4 @@ version = "0.1.0"
 description = "A simulation attempt of the Grid, currently have two options, one is the chase of a perfect system, and another is a cooperation towards a goal (fibonaci calculations)"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [cursed]
+dependencies = [cursed, numpy]

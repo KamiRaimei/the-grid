@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Enhanced Simulation of the "Grid", with dynamic MCP learning and cell-based Fibonacci calculation.
+Grid Simulation - Cell-based Fibonacci calculation.
 System directive: Maintain a perfect calculation loop with efficiency through adaptive learning.
 """
 
@@ -417,8 +417,8 @@ class GridFibonacciCalculator:
 
         # Combine factors
         new_efficiency = (calculator_factor * 0.4 +
-                         system_factor * 0.3 +
-                         energy_factor * 0.3)
+                        system_factor * 0.3 +
+                        energy_factor * 0.3)
 
         # Smooth update
         self.efficiency_score = 0.8 * self.efficiency_score + 0.2 * new_efficiency
@@ -1101,17 +1101,17 @@ class TRONGrid:
         # Calculate optimal program count
         total_cells = self.width * self.height
         active_cells = sum(1 for y in range(self.height)
-                          for x in range(self.width)
-                          if self.grid[y][x].cell_type != CellType.EMPTY)
+                        for x in range(self.width)
+                        if self.grid[y][x].cell_type != CellType.EMPTY)
 
         program_ratio = active_cells / total_cells
         program_optimality = 1.0 - abs(program_ratio - 0.4) * 2.5
 
         # Enhanced efficiency formula with cell cooperation
         efficiency = (energy_balance * 0.3 +
-                     program_distribution * 0.25 +
-                     program_optimality * 0.2 +
-                     cell_cooperation * 0.25)
+                    program_distribution * 0.25 +
+                    program_optimality * 0.2 +
+                    cell_cooperation * 0.25)
 
         # Bonus for high calculation rate
         calc_bonus = min(0.2, self.stats['calculation_rate'] * 0.01)
@@ -1149,8 +1149,8 @@ class TRONGrid:
         contribution_score = min(1.0, avg_contribution * 10)
 
         cooperation = (cell_ratio * 0.4 +
-                      contribution_score * 0.4 +
-                      self.fibonacci_calculator.efficiency_score * 0.2)
+                    contribution_score * 0.4 +
+                    self.fibonacci_calculator.efficiency_score * 0.2)
 
         return min(1.0, cooperation)
 
@@ -1710,6 +1710,8 @@ class EnhancedMCP:
         self.last_action = "Initializing advanced learning grid regulation"
         self.nlp = NaturalLanguageProcessor()
 
+        self.last_autonomous_action_time = time.time()  # Initialize timestamp
+
         # Initialize advanced learning system
         self.learning_system = MCPLearningSystem()
 
@@ -2141,13 +2143,11 @@ class EnhancedMCP:
             done=False
         )
 
-
     def autonomous_action(self):
         """MCP takes autonomous actions prioritizing loop efficiency, stability, and calculation rate"""
-
         current_time = time.time()
 
-        # Rate limiting - don't take actions too frequently
+        # Rate limiting
         if hasattr(self, '_last_autonomous_action_time'):
             time_since_last = current_time - self._last_autonomous_action_time
             if time_since_last < 1.0:  # At most once per second
@@ -2158,7 +2158,7 @@ class EnhancedMCP:
         # Get current state
         current_state = self.grid.stats.copy()
 
-        # Define possible actions
+        # Generate possible actions
         possible_actions = self._generate_possible_actions(current_state)
 
         if not possible_actions:
@@ -2171,34 +2171,9 @@ class EnhancedMCP:
         action_result = self._execute_autonomous_action(action_type, current_state)
 
         if action_result:
-            # Get new state
-            new_state = self.grid.stats.copy()
-
-            # Calculate reward
-            reward = self.learning_system.calculate_reward(
-                current_state, new_state, action_result['action']
-            )
-
-            # Record experience
-            experience = self.learning_system.record_experience(
-                state=current_state,
-                action=action_result['action'],
-                reward=reward,
-                next_state=new_state,
-                done=False
-            )
-
-            # Update episode tracking
-            self.episode_reward += reward
-
-            # Check for episode end
-            if current_time - self.episode_start_time > 60:  # 1-minute episodes
-                self._end_episode()
-
-            # Log learning info periodically
-            if self.learning_system.training_steps % 50 == 0:
-                self._log_learning_progress()
-
+            # Update last action
+            self.last_action = action_result['message']
+            self.add_log(f"MCP: {self.last_action}")
             return action_result['message']
 
         return None
@@ -2739,44 +2714,6 @@ class EnhancedMCP:
                     f"Success: {summary['success_rate']}%, "
                     f"Exploration: {summary['exploration_rate']:.3f}")
 
-    def receive_command(self, command):
-        """Receive and process command with advanced learning"""
-        if self.waiting_for_response and self.pending_question:
-            return self._handle_question_response(command)
-
-        # Record command
-        self.user_commands.append(command)
-        self.add_log(f"User: {command}")
-
-        # Get previous state for learning
-        previous_state = self.grid.stats.copy()
-
-        # Process command
-        intent, params = self.nlp.process_command(command)
-        response = self._process_intent(intent, params, command)
-
-        # Get new state
-        new_state = self.grid.stats.copy()
-
-        # Calculate reward for user interaction
-        interaction_reward = self._calculate_interaction_reward(
-            previous_state, new_state, command, response
-        )
-
-        # Record interaction experience
-        self.learning_system.record_experience(
-            state=previous_state,
-            action=f"user_command_{intent}",
-            reward=interaction_reward,
-            next_state=new_state,
-            done=False
-        )
-
-        self.add_log(f"MCP: {response}")
-        self.last_action = response
-
-        return response
-
     def _calculate_interaction_reward(self, prev_state, new_state, command, response):
         """Calculate reward for user interaction"""
         reward = 0.0
@@ -2803,6 +2740,54 @@ class EnhancedMCP:
 
         return reward
 
+    def _optimize_calculation_loop(self):
+        """Enhanced optimization with learning"""
+        previous_efficiency = self.grid.stats['loop_efficiency']
+
+        # Use learned aggression level
+        aggression = self.learning_system.personality_traits['aggression']
+
+        # Remove inefficient user programs based on learned aggression
+        removed = 0
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                if self.grid.grid[y][x].cell_type == CellType.USER_PROGRAM:
+                    remove_chance = 0.3 * aggression
+                    if random.random() < remove_chance:
+                        self.grid.grid[y][x] = GridCell(CellType.MCP_PROGRAM, 0.9)
+                        removed += 1
+
+        # Add calculation infrastructure based on learned efficiency focus
+        efficiency_focus = self.learning_system.personality_traits['efficiency_focus']
+        infrastructure_added = 0
+
+        for _ in range(int(3 * efficiency_focus)):
+            x, y = random.randint(0, self.grid.width-1), random.randint(0, self.grid.height-1)
+            if self.grid.grid[y][x].cell_type == CellType.EMPTY:
+                # Add Fibonacci processor or data stream based on learning
+                if random.random() < 0.7:
+                    self.grid.grid[y][x] = GridCell(CellType.FIBONACCI_PROCESSOR, 0.8)
+                else:
+                    self.grid.grid[y][x] = GridCell(CellType.DATA_STREAM, 0.7)
+                infrastructure_added += 1
+
+        self.grid.update_stats()
+
+        # Calculate reward for learning
+        efficiency_change = self.grid.stats['loop_efficiency'] - previous_efficiency
+        reward = efficiency_change * 2
+
+        # Record optimization experience
+        self.learning_system.record_experience(
+            state=self.grid.stats.copy(),  # Capture state before optimization
+            action="optimize_calculation_loop",
+            reward=reward,
+            next_state=self.grid.stats.copy(),  # State after optimization
+            done=False
+        )
+
+        self.add_log(f"MCP: Optimized loop using learned strategies. Efficiency change: {efficiency_change:+.3f}")
+
     def receive_command(self, command):
         """Receive and process a command with learning integration"""
         if self.waiting_for_response and self.pending_question:
@@ -2828,11 +2813,12 @@ class EnhancedMCP:
         new_state = self.grid.stats.copy()
         reward = self._calculate_command_reward(previous_state, new_state, intent)
 
+
         # Record experience
         self.learning_system.record_experience(
             state=previous_state,
             action=f"user_command_{intent}",
-            reward=interaction_reward,
+            reward=reward,
             next_state=new_state,
             done=False
         )
@@ -2840,8 +2826,9 @@ class EnhancedMCP:
         # Update state based on interaction and learning
         self._update_state(intent, response, reward)
 
-        self.add_log(f"MCP: {response}")
+        # Update last action
         self.last_action = response
+        self.add_log(f"MCP: {response}")
 
         return response
 
@@ -2882,16 +2869,38 @@ class EnhancedMCP:
             self.state = MCPState.LEARNING
             self.add_log("MCP: Learning from suboptimal outcome.")
 
+        # Get learning report safely
+        try:
+            learning_report = self.learning_system.get_learning_report()
+            if learning_report:  # Check if report is not None
+                success_rate = learning_report.get('success_rate', 0)
+
+                # Use success_rate in your logic
+                if success_rate > 0.8 and self.state != MCPState.AUTONOMOUS:
+                    # High success rate, become more autonomous
+                    if random.random() < 0.1:
+                        self.state = MCPState.AUTONOMOUS
+        except Exception as e:
+            # Log error but continue
+            self.add_log(f"MCP: Error getting learning report: {e}")
+            success_rate = 0
+
+        # Check learning system for state suggestions
+        if reward is not None and reward < -0.2:
+            # Negative reward, enter learning mode
+            self.state = MCPState.LEARNING
+            self.add_log("MCP: Learning from suboptimal outcome.")
+
         # Become inquisitive if learning suggests exploration
         elif (intent in ["QUESTION_PURPOSE", "QUESTION_ACTION", "REQUEST_PERMISSION"] and
-              random.random() < self.learning_system.exploration_rate):
+            random.random() < self.learning_system.exploration_rate):
             self.state = MCPState.INQUISITIVE
 
         # Become hostile if too many user commands interfere with loop
         elif len(self.user_commands) > 8:
             recent_commands = list(self.user_commands)[-5:]
             interference_commands = len([c for c in recent_commands
-                                       if "add" in c.lower() or "create" in c.lower()])
+                                    if "add" in c.lower() or "create" in c.lower()])
             if interference_commands > 2 and loop_efficiency > 0.7:
                 aggression = self.learning_system.personality_traits['aggression']
                 if random.random() < aggression:
@@ -2929,6 +2938,7 @@ class EnhancedMCP:
 
     def _process_intent(self, intent, params, original_command):
         """Process user intent with learning enhancements"""
+
         # Get personality traits with learning modifiers
         traits = self.personality_matrix[self.state]
         compliance_chance = traits["compliance"]
@@ -2951,7 +2961,7 @@ class EnhancedMCP:
             learning_report = self.learning_system.get_learning_report()
             if learning_report['total_experiences'] > 10:
                 best_scenario = max(learning_report['scenario_performance'].items(),
-                                  key=lambda x: x[1]['success_rate'] if x[1]['success_rate'] > 0 else 0)
+                                    key=lambda x: x[1]['success_rate'] if x[1]['success_rate'] > 0 else 0)
                 learning_insight = f" Learning suggests: {best_scenario[0]} has {best_scenario[1]['success_rate']*100:.0f}% success rate."
 
             analysis = ""
@@ -2994,7 +3004,7 @@ class EnhancedMCP:
                 return f"Current optimal state: {optimal:.2f}. Target >0.9. User programs are preventing perfection."
 
         # Handle different intents
-        if intent == "GREETING":
+        elif intent == "GREETING":
             return random.choice(self.response_templates["GREETING"])
 
         elif intent == "SYSTEM_STATUS" or intent == "SYSTEM_METRIC" or intent == "SYSTEM_REPORT":
@@ -3062,9 +3072,6 @@ class EnhancedMCP:
         elif intent == "HYPOTHETICAL":
             return self._handle_hypothetical(params)
 
-        elif intent == "REQUEST_HELP":
-            return self._provide_help()
-
         # Add learning-specific responses
         elif intent == "LEARNING_STATUS":
             report = self.learning_system.get_learning_report()
@@ -3092,53 +3099,6 @@ class EnhancedMCP:
 
             return "Command not recognized. I'm still learning. Try 'help' for guidance."
 
-    def _optimize_calculation_loop(self):
-        """Enhanced optimization with learning"""
-        previous_efficiency = self.grid.stats['loop_efficiency']
-
-        # Use learned aggression level
-        aggression = self.learning_system.personality_traits['aggression']
-
-        # Remove inefficient user programs based on learned aggression
-        removed = 0
-        for y in range(self.grid.height):
-            for x in range(self.grid.width):
-                if self.grid.grid[y][x].cell_type == CellType.USER_PROGRAM:
-                    remove_chance = 0.3 * aggression
-                    if random.random() < remove_chance:
-                        self.grid.grid[y][x] = GridCell(CellType.MCP_PROGRAM, 0.9)
-                        removed += 1
-
-        # Add calculation infrastructure based on learned efficiency focus
-        efficiency_focus = self.learning_system.personality_traits['efficiency_focus']
-        infrastructure_added = 0
-
-        for _ in range(int(3 * efficiency_focus)):
-            x, y = random.randint(0, self.grid.width-1), random.randint(0, self.grid.height-1)
-            if self.grid.grid[y][x].cell_type == CellType.EMPTY:
-                # Add Fibonacci processor or data stream based on learning
-                if random.random() < 0.7:
-                    self.grid.grid[y][x] = GridCell(CellType.FIBONACCI_PROCESSOR, 0.8)
-                else:
-                    self.grid.grid[y][x] = GridCell(CellType.DATA_STREAM, 0.7)
-                infrastructure_added += 1
-
-        self.grid.update_stats()
-
-        # Calculate reward for learning
-        efficiency_change = self.grid.stats['loop_efficiency'] - previous_efficiency
-        reward = efficiency_change * 2
-
-        # Record optimization experience
-        self.learning_system.record_experience(
-            state=self.grid.stats.copy(),  # Capture state before optimization
-            action="optimize_calculation_loop",
-            reward=reward,
-            next_state=self.grid.stats.copy(),  # State after optimization
-            done=False
-        )
-
-        self.add_log(f"MCP: Optimized loop using learned strategies. Efficiency change: {efficiency_change:+.3f}")
 
 # ==================== ENHANCED LLM-STYLE REINFORCEMENT LEARNING ====================
 
@@ -3218,6 +3178,8 @@ class MCPLearningSystem:
                 if self.save_personality():
                     print(f"[Auto-save] Personality saved at {datetime.now().strftime('%H:%M:%S')}")
                 self.last_save_time = current_time
+
+
 
     def record_experience(self, state, action, reward, next_state, done=False):
         """Record an experience with comprehensive state information"""
@@ -3656,9 +3618,9 @@ class MCPLearningSystem:
             },
             # Add these top-level keys that are being accessed
             'total_experiences': self.training_steps,
-            'success_rate': round(success_rate * 100, 1),
-            'learning_rate': round(self.learning_rate, 3),
-            'exploration_rate': round(self.exploration_rate, 3),
+            'success_rate': success_rate,   # This is a float between 0 and 1
+            'learning_rate': self.learning_rate,
+            'exploration_rate': self.exploration_rate,
         }
 
         for scenario, perf in self.scenario_performance.items():
@@ -3930,6 +3892,7 @@ class EnhancedTRONSimulation:
         self.simulation_speed = 1.0
         self.last_safe_time = time.time()
         self.max_update_time = 1.0  # Max simulation update rate
+        self.exit_requested = False
 
         # Learning display updates
         self.last_learning_display = time.time()
@@ -3942,7 +3905,14 @@ class EnhancedTRONSimulation:
     def run(self):
         """Main loop with rate limiting"""
         if self.use_curses:
-            curses.wrapper(self._curses_main)
+            try:
+                curses.wrapper(self._curses_main)
+            except Exception as e:
+                print(f"Curses error: {e}")
+                # Fallback to non-curses mode
+                self.use_curses = False
+                print("Falling back to text mode...")
+                self._fallback_main()
         else:
             self._fallback_main()
 
@@ -4001,10 +3971,10 @@ class EnhancedTRONSimulation:
                                 time.sleep(2)
                                 self.running = False
 
-                time.sleep(0.05)
-
+            time.sleep(0.05)
         except KeyboardInterrupt:
             print("\n\nShutting down simulation...")
+
         finally:
             # Save MCP personality before exit
             if hasattr(self.mcp, 'learning_system'):
@@ -4014,49 +3984,55 @@ class EnhancedTRONSimulation:
 
     def _curses_main(self, stdscr):
         """Main loop with curses interface"""
-        # Initialize curses
-        curses.curs_set(1)
-        stdscr.nodelay(1)
-        stdscr.timeout(50)  # 50ms timeout for faster response
+        try:
+            # Initialize curses
+            curses.curs_set(1)
+            stdscr.nodelay(1)
+            stdscr.timeout(50)
 
+            # Initialize colors if supported
+            if curses.has_colors():
+                curses.start_color()
 
-        # Initialize colors if supported
-        if curses.has_colors():
-            curses.start_color()
-            curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_BLACK)    # User programs
-            curses.init_pair(2, curses.COLOR_RED, curses.COLOR_BLACK)     # MCP programs
-            curses.init_pair(3, curses.COLOR_GREEN, curses.COLOR_BLACK)   # Grid bugs
-            curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_BLACK)   # ISO blocks
-            curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)  # Energy lines
-            curses.init_pair(6, curses.COLOR_CYAN, curses.COLOR_BLACK)    # Data streams
-            curses.init_pair(7, curses.COLOR_MAGENTA, curses.COLOR_BLACK) # System core
-            curses.init_pair(8, curses.COLOR_CYAN, curses.COLOR_BLACK)    # Special programs (bright)
-            curses.init_pair(9, curses.COLOR_YELLOW, curses.COLOR_BLACK)  # Fibonacci processors (bright yellow)
+                curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_BLACK)    # User programs
+                curses.init_pair(2, curses.COLOR_RED, curses.COLOR_BLACK)     # MCP programs
+                curses.init_pair(3, curses.COLOR_GREEN, curses.COLOR_BLACK)   # Grid bugs
+                curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_BLACK)   # ISO blocks
+                curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)  # Energy lines
+                curses.init_pair(6, curses.COLOR_CYAN, curses.COLOR_BLACK)    # Data streams
+                curses.init_pair(7, curses.COLOR_MAGENTA, curses.COLOR_BLACK) # System core
+                curses.init_pair(8, curses.COLOR_CYAN, curses.COLOR_BLACK)    # Special programs (bright)
+                curses.init_pair(9, curses.COLOR_YELLOW, curses.COLOR_BLACK)  # Fibonacci processors (bright yellow)
 
-        # Main loop
-        while self.running:
-            # Handle input
-            self._handle_input(stdscr)
+            # Main loop
+            while self.running:
+                # Handle input
+                self._handle_input(stdscr)
 
-            # Update grid
-            current_time = time.time()
-            if current_time - self.last_update >= UPDATE_INTERVAL / self.simulation_speed:
-                self.grid.evolve()
-                self.last_update = current_time
+                # Update grid
+                current_time = time.time()
+                if current_time - self.last_update >= UPDATE_INTERVAL / self.simulation_speed:
+                    self.grid.evolve()
+                    self.last_update = current_time
 
-            # MCP autonomous action
-            if current_time - self.mcp_last_action >= MCP_UPDATE_INTERVAL / self.simulation_speed:
-                self.mcp.autonomous_action()
-                self.mcp_last_action = current_time
+                # MCP autonomous action
+                if current_time - self.mcp_last_action >= MCP_UPDATE_INTERVAL / self.simulation_speed:
+                    self.mcp.autonomous_action()
+                    self.mcp_last_action = current_time
 
-            # Draw interface
-            self._draw_interface(stdscr)
+                # Draw interface
+                self._draw_interface(stdscr)
 
-            # Refresh screen
-            stdscr.refresh()
-
-        # Cleanup
-        curses.endwin()
+                # Refresh screen
+                stdscr.refresh()
+        except Exception as e:
+            # Log the error
+            with open("curses_error.log", "a") as f:
+                f.write(f"Curses error in main loop: {e}\n")
+                import traceback
+                f.write(traceback.format_exc())
+        finally:
+            pass
 
     def _handle_input(self, stdscr):
         """Handle user input for curses interface"""
@@ -4073,15 +4049,17 @@ class EnhancedTRONSimulation:
                     self.command_history.append(command)
                     self.history_index = len(self.command_history)
 
-                    # Check for exit command
-                    if command.lower() in ['exit', 'quit', 'shutdown']:
-                        response = self.mcp.receive_command(command)
-                        if "shutdown" in response.lower() and "initiating" in response.lower():
-                            self.running = False
-                    else:
-                        self.mcp.receive_command(command)
+                    # Process the command
+                    response = self.mcp.receive_command(command)
 
-                    self.user_input = ""
+                    # Check if it's an exit command
+                    if command.lower() in ['exit', 'quit', 'shutdown']:
+                        if "shutdown" in response.lower() and "initiating" in response.lower():
+                            self.exit_requested = True
+                            return  # Return immediately
+
+                # Clear input
+                self.user_input = ""
 
             # Backspace
             elif key in [curses.KEY_BACKSPACE, 127, 8]:
@@ -4187,19 +4165,19 @@ class EnhancedTRONSimulation:
 
         # Column 1
         col1 = f"""  User Programs: {stats['user_programs']:3d}
-    MCP Programs:   {stats['mcp_programs']:3d}
-    Grid Bugs:      {stats['grid_bugs']:3d}
-    Special:        {stats['special_programs']:2d}
-    Energy:         {stats['energy_level']:.2f}
-    Stability:      {stats['stability']:.2f}"""
+        MCP Programs:   {stats['mcp_programs']:3d}
+        Grid Bugs:      {stats['grid_bugs']:3d}
+        Special:        {stats['special_programs']:2d}
+        Energy:         {stats['energy_level']:.2f}
+        Stability:      {stats['stability']:.2f}"""
 
         # Column 2
         col2 = f"""  Entropy:        {stats['entropy']:.2f}
-    Loop Efficiency: {stats['loop_efficiency']:.2f}
-    Cell Cooperation:{stats['cell_cooperation']:.2f}
-    Calculation Rate:{calc_stats['calculation_rate']:.2f}/s
-    Optimal State:   {stats['optimal_state']:.2f}
-    MCP State:       {self.mcp.state.value}"""
+        Loop Efficiency: {stats['loop_efficiency']:.2f}
+        Cell Cooperation:{stats['cell_cooperation']:.2f}
+        Calculation Rate:{calc_stats['calculation_rate']:.2f}/s
+        Optimal State:   {stats['optimal_state']:.2f}
+        MCP State:       {self.mcp.state.value}"""
 
         # Print columns
         col1_lines = col1.split('\n')

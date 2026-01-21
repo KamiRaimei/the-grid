@@ -6,6 +6,7 @@ dist/
 wheels/
 *.egg-info
 mcp_personality.json
+curses_error.log
 
 # Virtual environments
 .venv
