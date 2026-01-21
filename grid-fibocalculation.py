@@ -82,7 +82,7 @@ class MCPState(Enum):
     INQUISITIVE = "INQUISITIVE"
     LEARNING = "LEARNING"
 
-# ==================== ENHANCED CELL VISUALIZATION ====================
+# ==================== CELL VISUALIZATION ====================
 
 @dataclass
 class GridCell:
@@ -133,12 +133,13 @@ class GridCell:
             CellType.MCP_PROGRAM: 'M',
             CellType.GRID_BUG: 'B',
             CellType.ISO_BLOCK: '#',
-            CellType.ENERGY_LINE: '=',  # Fallback
-            CellType.DATA_STREAM: '~',  # Fallback
+            CellType.ENERGY_LINE: '=',
+            CellType.DATA_STREAM: '~',
             CellType.SYSTEM_CORE: '@',
             CellType.SPECIAL_PROGRAM: 'S',
             CellType.FIBONACCI_PROCESSOR: 'F'
         }
+
         return chars.get(self.cell_type, '?')
 
     def color(self):
@@ -167,7 +168,7 @@ class GridCell:
             else:
                 self.processing = False
 
-# ==================== ENHANCED FIBONACCI CALCULATION ====================
+# ==================== FIBONACCI CALCULATION ====================
 
 class GridFibonacciCalculator:
     """Manages Fibonacci calculation through grid cell cooperation"""
@@ -478,7 +479,7 @@ class GridFibonacciCalculator:
             'active_calculators': active_calculators
         }
 
-# ==================== ENHANCED TRONGRID WITH VISUAL EFFECTS ====================
+# ==================== MAIN GRID ====================
 
 class TRONGrid:
     """Enhanced grid simulation with visual effects and cell-based calculation"""
@@ -1497,12 +1498,209 @@ class TRONGrid:
 
 # MCP Language Processor
 
-class NaturalLanguageProcessor:
+class LearnableNaturalLanguageProcessor:
     """Simple natural language processing for MCP commands"""
 
     def __init__(self):
-        self.patterns = self._initialize_patterns()
-        self.context = {}
+        self.learned_patterns_file = "mcp_learned_patterns.json"
+        self.base_intents = self._initialize_base_intents()
+        self.learned_intents = self._load_learned_intents()
+        self.intent_history = deque(maxlen=100)
+
+        # For learning new commands
+        self.learning_mode = False
+        self.pending_teaching = None
+
+
+        # Statistics
+        self.total_commands_processed = 0
+        self.successful_matches = 0
+        self.learned_pattern_count = len(self.learned_intents)
+
+    def _initialize_base_intents(self):
+            """Initialize base intents that every MCP should know"""
+            return {
+                # System commands
+                "status": ["status", "system status", "how is system", "system report", "check system"],
+                "help": ["help", "what can i do", "commands", "show commands", "list commands"],
+                "exit": ["exit", "quit", "shutdown", "leave", "goodbye"],
+
+                # Program management
+                "add_user_program": ["add user program", "create user program", "make user program", "spawn user program"],
+                "add_mcp_program": ["add mcp program", "create mcp program", "make mcp program"],
+                "remove_bug": ["remove bug", "delete bug", "eliminate bug", "kill bug"],
+                "quarantine_bug": ["quarantine bug", "isolate bug", "contain bug"],
+
+                # System operations
+                "boost_energy": ["boost energy", "add energy", "increase power", "power up"],
+                "repair_system": ["repair system", "fix system", "restore system", "heal system"],
+                "scan_area": ["scan", "scan area", "analyze", "examine"],
+                "optimize_loop": ["optimize loop", "improve efficiency", "enhance loop", "optimize calculation"],
+
+                # Special programs
+                "list_programs": ["list programs", "show programs", "view programs", "special programs"],
+                "create_scanner": ["create scanner", "build scanner", "make scanner", "deploy scanner"],
+                "create_defender": ["create defender", "build defender", "make defender"],
+                "create_repair": ["create repair program", "build repair", "make repair"],
+                "create_fibonacci_calculator": ["create fibonacci calculator", "build fibonacci", "deploy calculator"],
+
+                # MCP interaction
+                "who_are_you": ["who are you", "what are you", "identify yourself", "your name"],
+                "what_should_i_do": ["what should i do", "what do you suggest", "recommend something", "advise me"],
+                "why_did_you": ["why did you", "why did mcp", "explain that action", "why that action"],
+
+                # Learning specific
+                "learning_status": ["learning status", "mcp learning", "personality status", "learning report"],
+                "cell_cooperation": ["cell cooperation", "cooperation level", "cell collaboration"],
+                "perfect_loop": ["perfect loop", "optimal state", "ideal loop", "perfect calculation"],
+                "loop_efficiency": ["loop efficiency", "calculation efficiency", "efficiency status"],
+
+                # Fibonacci calculation
+                "calculate_fibonacci": ["calculate fibonacci", "compute fibonacci", "next fibonacci", "fibonacci number"],
+                "deploy_processors": ["deploy processors", "add processors", "create processors", "fibonacci processors"],
+            }
+
+    def _load_learned_intents(self):
+        """Load learned intents from file"""
+        learned_intents = {}
+
+        if os.path.exists(self.learned_patterns_file):
+            try:
+                with open(self.learned_patterns_file, 'r') as f:
+                    data = json.load(f)
+                    learned_intents = data.get('learned_intents', {})
+                    print(f"Loaded {len(learned_intents)} learned patterns")
+            except Exception as e:
+                print(f"Failed to load learned patterns: {e}")
+
+        return learned_intents
+
+    def _save_learned_intents(self):
+        """Save learned intents to file"""
+        try:
+            data = {
+                'learned_intents': self.learned_intents,
+                'total_learned': len(self.learned_intents),
+                'last_updated': datetime.now().isoformat(),
+                'statistics': {
+                    'total_commands': self.total_commands_processed,
+                    'success_rate': self.successful_matches / max(1, self.total_commands_processed),
+                    'learned_patterns': len(self.learned_intents)
+                }
+            }
+
+            with open(self.learned_patterns_file, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            return True
+        except Exception as e:
+            print(f"Failed to save learned patterns: {e}")
+            return False
+
+    def teach_new_command(self, user_input, intent, examples=None):
+        """Teach the MCP a new way to express a command"""
+        # Normalize intent name to uppercase for consistency
+        intent = intent.upper()
+
+        # Check if intent already exists in base intents
+        if intent.lower() in self.base_intents:
+            print(f"Intent '{intent}' is a base intent and cannot be modified")
+            return False
+
+        if intent not in self.learned_intents:
+            # Create new intent category if it doesn't exist
+            self.learned_intents[intent] = []
+
+        # Clean and normalize the user input
+        normalized_input = self._normalize_input(user_input)
+
+        # Add to learned intents
+        if normalized_input not in self.learned_intents[intent]:
+            self.learned_intents[intent].append(normalized_input)
+
+            # Save to file
+            success = self._save_learned_intents()
+
+            # Update learned pattern count
+            self.learned_pattern_count = len(self.learned_intents)
+
+            # If examples provided, learn those too
+            if examples and success:
+                for example in examples:
+                    example_normalized = self._normalize_input(example)
+                    if example_normalized not in self.learned_intents[intent]:
+                        self.learned_intents[intent].append(example_normalized)
+
+                # Save again with examples
+                self._save_learned_intents()
+
+            return success
+
+        return False
+
+    def _normalize_input(self, text):
+        """Normalize input text for better matching"""
+        if not text:
+            return ""
+
+        text = text.lower().strip()
+
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+
+        # Remove common filler words (optional, can be expanded)
+        filler_words = ['please', 'could you', 'would you', 'can you', 'maybe', 'i want to', 'i need to']
+        for word in filler_words:
+            # Use regex to remove the word only when it's at the beginning
+            pattern = r'^\s*' + re.escape(word) + r'\s+'
+            text = re.sub(pattern, '', text)
+
+        return text.strip()
+
+    def extract_parameters(self, command, intent):
+        """Extract parameters from command"""
+        params = {}
+        command_lower = command.lower()
+
+        # Location extraction
+        location_match = re.search(r'(\d+)\s*,\s*(\d+)', command_lower)
+        if location_match:
+            params['x'] = int(location_match.group(1))
+            params['y'] = int(location_match.group(2))
+
+        # Program type extraction for ADD_PROGRAM intent
+        if intent in ["add_user_program", "add_mcp_program", "ADD_PROGRAM"]:
+            if 'user' in command_lower:
+                params['program_type'] = 'USER'
+            elif 'mcp' in command_lower:
+                params['program_type'] = 'MCP'
+
+        # Special program type extraction
+        if intent in ["create_scanner", "create_defender", "create_repair", "create_fibonacci_calculator", "CREATE_SPECIAL"]:
+            if 'scanner' in command_lower:
+                params['special_type'] = 'SCANNER'
+            elif 'defender' in command_lower:
+                params['special_type'] = 'DEFENDER'
+            elif 'repair' in command_lower:
+                params['special_type'] = 'REPAIR'
+            elif 'fibonacci' in command_lower or 'calculator' in command_lower:
+                params['special_type'] = 'FIBONACCI_CALCULATOR'
+
+        # Name extraction
+        name_match = re.search(r'named?\s+["\']?([^"\'\s]+)["\']?', command_lower)
+        if name_match:
+            params['name'] = name_match.group(1)
+
+        # Area/size extraction
+        if 'all' in command_lower:
+            params['scope'] = 'ALL'
+        elif 'area' in command_lower or 'region' in command_lower:
+            params['scope'] = 'AREA'
+
+        # Store original command
+        params['original_command'] = command
+
+        return params
 
     def _initialize_patterns(self):
         """Initialize natural language patterns"""
@@ -1567,136 +1765,235 @@ class NaturalLanguageProcessor:
         # Compile patterns
         return {re.compile(pattern, re.IGNORECASE): intent for pattern, intent in patterns.items()}
 
-    def extract_parameters(self, command: str, intent: str) -> Dict[str, Any]:
-        """Extract parameters from natural language command"""
-        params = {}
-        command_lower = command.lower()
+    def _find_best_match(self, command):
+        """Find the best matching intent for a command"""
+        normalized_command = self._normalize_input(command)
 
-        if intent == "ADD_PROGRAM":
-            # Extract program type
-            if "user" in command_lower:
-                params["program_type"] = "USER"
-            elif "mcp" in command_lower or "your" in command_lower:
-                params["program_type"] = "MCP"
-            elif "energy" in command_lower:
-                params["program_type"] = "ENERGY"
-            else:
-                params["program_type"] = "USER"
+        # First check learned intents (highest priority)
+        for intent, patterns in self.learned_intents.items():
+            for pattern in patterns:
+                if self._matches_pattern(normalized_command, pattern):
+                    return intent, pattern
 
-            # Extract location if mentioned
-            location_match = re.search(r'at\s+(\d+)\s*,\s*(\d+)', command_lower)
-            if location_match:
-                params["x"] = int(location_match.group(1))
-                params["y"] = int(location_match.group(2))
-            elif "near" in command_lower or "around" in command_lower:
-                params["location"] = "NEARBY"
-            elif "center" in command_lower:
-                params["location"] = "CENTER"
+        # Then check base intents
+        for intent, patterns in self.base_intents.items():
+            for pattern in patterns:
+                if self._matches_pattern(normalized_command, pattern):
+                    return intent, pattern
 
-        if intent == "CREATE_SPECIAL":
-            # First, try to extract program type from command
-            for prog_type in SPECIAL_PROGRAM_TYPES:
-                if prog_type.lower() in command_lower:
-                    params["special_type"] = prog_type
-                    break
+        # Try fuzzy matching for learned intents
+        for intent, patterns in self.learned_intents.items():
+            for pattern in patterns:
+                similarity = self._calculate_similarity(normalized_command, pattern)
+                if similarity > 0.7:  # 70% similarity threshold
+                    return intent, pattern
 
-            # If not found, use default
-            if "special_type" not in params:
-                params["special_type"] = random.choice(SPECIAL_PROGRAM_TYPES)
+        # Try fuzzy matching for base intents
+        best_match = None
+        best_similarity = 0.5  # Minimum 50% similarity
 
-            # Extract name - more robust pattern matching
-            name_patterns = [
-                r'named?\s+["\']?([^"\']+)["\']?',
-                r'called\s+["\']?([^"\']+)["\']?',
-                r'"([^"]+)"',
-                r"'([^']+)'"
-            ]
+        for intent, patterns in self.base_intents.items():
+            for pattern in patterns:
+                similarity = self._calculate_similarity(normalized_command, pattern)
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_match = (intent, pattern)
 
-            for pattern in name_patterns:
-                name_match = re.search(pattern, command_lower)
-                if name_match:
-                    params["name"] = name_match.group(1).strip()
-                    break
+        if best_match:
+            return best_match
 
-            # Default name if none specified
-            if "name" not in params:
-                params["name"] = f"{params['special_type']}_{random.randint(100, 999)}"
+        return None, None
 
-        elif intent == "USE_SPECIAL":
-            # Extract program name/type
-            for prog_type in SPECIAL_PROGRAM_TYPES:
-                if prog_type.lower() in command_lower:
-                    params["program_type"] = prog_type
-                    break
+    def _matches_pattern(self, command, pattern):
+        """Check if command matches a pattern"""
+        # Convert pattern to regex-like matching
+        pattern_words = pattern.lower().split()
+        command_words = command.lower().split()
 
-            # Extract function
-            if "scan" in command_lower:
-                params["function"] = "scan_area"
-            elif "quarantine" in command_lower or "defend" in command_lower:
-                params["function"] = "quarantine_bug"
-            elif "repair" in command_lower or "fix" in command_lower:
-                params["function"] = "repair_cell"
-            elif "disrupt" in command_lower or "sabotage" in command_lower:
-                params["function"] = "disrupt_mcp"
-            elif "reconfigure" in command_lower or "optimize" in command_lower:
-                params["function"] = "reconfigure_cells"
-            elif "harvest" in command_lower or "collect" in command_lower:
-                params["function"] = "harvest_energy"
-            elif "fibonacci" in command_lower or "calculate" in command_lower:
-                params["function"] = "calculate_next"
+        # Check if all pattern words are in command
+        for word in pattern_words:
+            if word not in command:
+                return False
 
-        elif intent == "REMOVE_BUG" or intent == "QUARANTINE_BUG":
-            # Extract location
-            location_match = re.search(r'at\s+(\d+)\s*,\s*(\d+)', command_lower)
-            if location_match:
-                params["x"] = int(location_match.group(1))
-                params["y"] = int(location_match.group(2))
-            elif "all" in command_lower:
-                params["scope"] = "ALL"
+        # Additional check: pattern should be significant part of command
+        match_ratio = len(pattern_words) / max(len(command_words), 1)
+        return match_ratio > 0.3  # At least 30% of command matches pattern
 
-        elif intent == "CHANGE_SPEED":
-            # Extract speed value
-            speed_match = re.search(r'(\d+(?:\.\d+)?)\s*(times?|x|speed)', command_lower)
-            if speed_match:
-                params["multiplier"] = float(speed_match.group(1))
-            elif "faster" in command_lower:
-                params["multiplier"] = 2.0
-            elif "slower" in command_lower:
-                params["multiplier"] = 0.5
+    def _calculate_similarity(self, text1, text2):
+        """Calculate similarity between two texts"""
+        words1 = set(text1.split())
+        words2 = set(text2.split())
 
-        return params
+        if not words1 or not words2:
+            return 0
 
-    def process_command(self, command: str) -> Tuple[str, Dict[str, Any]]:
-        """Process natural language command and return intent + parameters"""
+        intersection = len(words1.intersection(words2))
+        union = len(words1.union(words2))
+
+        return intersection / union
+
+    def process_command(self, command):
+        """Process a command and return intent + parameters"""
+        self.total_commands_processed += 1
+
+        # Clean command
         command = command.strip()
+        if not command:
+            return "UNKNOWN", {}
 
-        # Check for exact matches first
-        exact_matches = {
-            "status": "SYSTEM_STATUS",
-            "help": "REQUEST_HELP",
-            "exit": "EXIT",
-            "quit": "EXIT",
-            "list programs": "LIST_SPECIAL",
-            "scan": "SCAN_AREA",
-            "repair": "REPAIR_SYSTEM",
-            "efficiency": "LOOP_EFFICIENCY",
-            "optimize": "OPTIMIZE_LOOP",
-            "learning_status": "LEARNING_STATUS",
+        # Handle teaching mode
+        if self.learning_mode and self.pending_teaching:
+            return self._handle_teaching_response(command)
+
+        # Check for teaching command
+        if command.lower().startswith("teach:"):
+            return self._handle_teaching_command(command)
+
+        # Find best matching intent
+        intent, matched_pattern = self._find_best_match(command)
+
+        if intent:
+            self.successful_matches += 1
+            self.intent_history.append({
+                'timestamp': datetime.now().isoformat(),
+                'command': command,
+                'intent': intent,
+                'pattern': matched_pattern
+            })
+
+            # Extract parameters
+            params = self.extract_parameters(command, intent)
+            params['original_command'] = command
+
+            return intent, params
+        else:
+            # No match found - could start teaching
+            self.intent_history.append({
+                'timestamp': datetime.now().isoformat(),
+                'command': command,
+                'intent': 'UNKNOWN',
+                'pattern': None
+            })
+
+            # Check if we should ask for teaching
+            if len(command.split()) >= 2:  # At least 2 words
+                return "REQUEST_TEACHING", {'original_command': command}
+            else:
+                return "UNKNOWN", {'original_command': command}
+
+    def _handle_teaching_command(self, command):
+        """Handle a teaching command"""
+        # Format: "teach: <command> means <intent>"
+        # or: "teach: <command> as <intent>"
+
+        command = command[6:].strip()  # Remove "teach:"
+
+        # Parse the teaching command
+        if ' means ' in command:
+            parts = command.split(' means ', 1)
+            user_command = parts[0].strip()
+            intent = parts[1].strip().upper()
+        elif ' as ' in command:
+            parts = command.split(' as ', 1)
+            user_command = parts[0].strip()
+            intent = parts[1].strip().upper()
+        else:
+            # Start interactive teaching
+            self.learning_mode = True
+            self.pending_teaching = {
+                'user_command': command,
+                'step': 'ask_intent'
+            }
+            return "TEACHING_STARTED", {
+                'original_command': command,
+                'message': f"What intent should '{command}' map to? (e.g., ADD_PROGRAM, SCAN_AREA, etc.)"
+            }
+
+        # Direct teaching
+        success = self.teach_new_command(user_command, intent)
+
+        if success:
+            return "TEACHING_SUCCESS", {
+                'original_command': command,
+                'learned_command': user_command,
+                'intent': intent,
+                'message': f"Learned: '{user_command}' → {intent}"
+            }
+        else:
+            return "TEACHING_FAILED", {
+                'original_command': command,
+                'message': "Could not learn that command. It might already exist."
+            }
+
+    def _handle_teaching_response(self, response):
+        """Handle user response during teaching mode"""
+        step = self.pending_teaching['step']
+
+        if step == 'ask_intent':
+            intent = response.strip().upper()
+            user_command = self.pending_teaching['user_command']
+
+            # Teach the command
+            success = self.teach_new_command(user_command, intent)
+
+            # Exit teaching mode
+            self.learning_mode = False
+            teaching_data = self.pending_teaching.copy()
+            self.pending_teaching = None
+
+            if success:
+                return "TEACHING_SUCCESS", {
+                    'original_command': user_command,
+                    'learned_command': user_command,
+                    'intent': intent,
+                    'message': f"Successfully learned: '{user_command}' → {intent}"
+                }
+            else:
+                return "TEACHING_FAILED", {
+                    'original_command': user_command,
+                    'message': f"Could not learn '{user_command}' as {intent}. It might already exist."
+                }
+
+        # Should not reach here
+        self.learning_mode = False
+        self.pending_teaching = None
+        return "UNKNOWN", {'original_command': response}
+
+    def get_statistics(self):
+        """Get processor statistics"""
+        return {
+            'total_commands': self.total_commands_processed,
+            'successful_matches': self.successful_matches,
+            'success_rate': self.successful_matches / max(1, self.total_commands_processed),
+            'learned_patterns': len(self.learned_intents),
+            'base_patterns': sum(len(patterns) for patterns in self.base_intents.values()),
+            'recent_history': list(self.intent_history)[-5:] if self.intent_history else []
         }
 
-        if command.lower() in exact_matches:
-            return exact_matches[command.lower()], {}
+    def get_suggested_intents(self, command):
+        """Get suggested intents for an unknown command"""
+        suggestions = []
+        normalized_command = self._normalize_input(command)
+        command_words = set(normalized_command.split())
 
-        # Try pattern matching
-        for pattern, intent in self.patterns.items():
-            if pattern.search(command):
-                params = self.extract_parameters(command, intent)
-                return intent, params
+        for intent, patterns in {**self.base_intents, **self.learned_intents}.items():
+            for pattern in patterns:
+                pattern_words = set(pattern.split())
+                similarity = len(command_words.intersection(pattern_words)) / len(command_words.union(pattern_words))
 
-        # Default to unknown
-        return "UNKNOWN", {"original_command": command}
+                if similarity > 0.3:  # At least 30% similarity
+                    suggestions.append({
+                        'intent': intent,
+                        'pattern': pattern,
+                        'similarity': similarity
+                    })
 
-# ==================== ENHANCED MCP WITH LEARNING ====================
+        # Sort by similarity
+        suggestions.sort(key=lambda x: x['similarity'], reverse=True)
+
+        return suggestions[:3]  # Top 3 suggestions
+
+# ==================== Master Control PRogram Logic ====================
 
 class EnhancedMCP:
     """Enhanced Master Control Program with learning capabilities"""
@@ -1708,10 +2005,14 @@ class EnhancedMCP:
         self.log = deque(maxlen=100)
         self.user_commands = deque(maxlen=50)
         self.last_action = "Initializing advanced learning grid regulation"
-        self.nlp = NaturalLanguageProcessor()
+
+        # Init language processor
+        self.nlp = LearnableNaturalLanguageProcessor()
+
 
         self.last_autonomous_action_time = time.time()  # Initialize timestamp
-
+        self._last_autonomous_action_time = time.time()
+        self.should_shutdown = False
         # Initialize advanced learning system
         self.learning_system = MCPLearningSystem()
 
@@ -1749,6 +2050,32 @@ class EnhancedMCP:
 
         # Record initial state
         self._record_initial_state()
+
+        self.response_templates.update({
+                    "REQUEST_TEACHING": [
+                        "I don't understand that command. Would you like to teach me what it means?",
+                        "Command not recognized. You can teach me by saying: 'teach: [command] as [intent]'",
+                        "I don't know that command. I can learn it if you teach me.",
+                    ],
+                    "TEACHING_STARTED": [
+                        "I'm ready to learn. {message}",
+                        "Teaching mode activated. {message}",
+                        "I'll learn this new command. {message}",
+                    ],
+                    "TEACHING_SUCCESS": [
+                        "Thank you! I've learned: '{learned_command}' means {intent}.",
+                        "Learning successful. I now understand '{learned_command}' as {intent}.",
+                        "Command learned: '{learned_command}' → {intent}. I'll remember this.",
+                    ],
+                    "TEACHING_FAILED": [
+                        "I couldn't learn that command. {message}",
+                        "Learning failed. {message}",
+                        "Unable to learn: {message}",
+                    ]
+                })
+
+        self.add_log("MCP: Advanced learning system with learnable NLP initialized.")
+        self.add_log(f"MCP: Loaded {self.nlp.learned_pattern_count} learned patterns.")
 
     def _initialize_response_templates(self):
         """Initialize natural language response templates"""
@@ -2035,7 +2362,7 @@ class EnhancedMCP:
                 if self.grid.grid[y][x].cell_type == CellType.EMPTY:
                     self.grid.grid[y][x] = GridCell(CellType.ENERGY_LINE, 0.9)
                     added += 1
-
+                    return f"Added {added} energy distribution lines"
             self.grid.update_stats()
             return f"Added {added} energy distribution lines"
         else:
@@ -2937,11 +3264,60 @@ class EnhancedMCP:
             self.add_log(f"MCP: Learning database: {exp_count} experiences accumulated.")
 
     def _process_intent(self, intent, params, original_command):
-        """Process user intent with learning enhancements"""
+        """Process user intent with learning enhancements using response templates"""
 
         # Get personality traits with learning modifiers
         traits = self.personality_matrix[self.state]
         compliance_chance = traits["compliance"]
+
+        # Languange learning
+        if intent == "REQUEST_TEACHING":
+                    template = random.choice(self.response_templates["REQUEST_TEACHING"])
+                    return template
+
+        elif intent == "TEACHING_STARTED":
+            template = random.choice(self.response_templates["TEACHING_STARTED"])
+            return template.format(**params)
+
+        elif intent == "TEACHING_SUCCESS":
+            template = random.choice(self.response_templates["TEACHING_SUCCESS"])
+
+            self.add_log(f"MCP: Learned new command: '{params.get('learned_command', '')}' → {params.get('intent', '')}")
+
+            return template.format(**params)
+
+        elif intent == "TEACHING_FAILED":
+                    template = random.choice(self.response_templates["TEACHING_FAILED"])
+                    return template.format(**params)
+
+        # Map the new intents to the old ones for compatibility
+        intent_mapping = {
+            "add_user_program": "ADD_PROGRAM",
+            "add_mcp_program": "ADD_PROGRAM",
+            "remove_bug": "REMOVE_BUG",
+            "quarantine_bug": "QUARANTINE_BUG",
+            "boost_energy": "BOOST_ENERGY",
+            "repair_system": "REPAIR_SYSTEM",
+            "scan_area": "SCAN_AREA",
+            "optimize_loop": "OPTIMIZE_LOOP",
+            "list_programs": "LIST_SPECIAL",
+            "create_scanner": "CREATE_SPECIAL",
+            "create_defender": "CREATE_SPECIAL",
+            "create_repair": "CREATE_SPECIAL",
+            "create_fibonacci_calculator": "CREATE_SPECIAL",
+            "who_are_you": "MCP_IDENTITY",
+            "what_should_i_do": "REQUEST_SUGGESTION",
+            "why_did_you": "QUESTION_PURPOSE",
+            "learning_status": "LEARNING_STATUS",
+            "cell_cooperation": "LOOP_EFFICIENCY",  # Map to existing template
+            "perfect_loop": "PERFECT_LOOP",
+            "loop_efficiency": "LOOP_EFFICIENCY",
+            "calculate_fibonacci": "OPTIMIZE_LOOP",  # Map to optimization
+            "deploy_processors": "CREATE_SPECIAL",
+        }
+
+        # Map to old intent if needed
+        old_intent = intent_mapping.get(intent, intent)
 
         # Apply learning system modifiers
         if intent in ["ADD_PROGRAM", "CREATE_SPECIAL"]:
@@ -2951,77 +3327,186 @@ class EnhancedMCP:
             compliance_chance = self.learning_system.get_decision_modifier(
                 'efficiency_priority', compliance_chance)
 
-        # Handle different intents with learning
-        if intent == "LOOP_EFFICIENCY":
-            stats = self.grid.stats
-            calc_stats = self.grid.fibonacci_calculator.get_calculation_stats()
+        # Get system stats for template formatting
+        stats = self.grid.stats
+        calc_stats = self.grid.fibonacci_calculator.get_calculation_stats()
 
-            # Include learning insights
-            learning_insight = ""
-            learning_report = self.learning_system.get_learning_report()
-            if learning_report['total_experiences'] > 10:
-                best_scenario = max(learning_report['scenario_performance'].items(),
-                                    key=lambda x: x[1]['success_rate'] if x[1]['success_rate'] > 0 else 0)
-                learning_insight = f" Learning suggests: {best_scenario[0]} has {best_scenario[1]['success_rate']*100:.0f}% success rate."
+        # Use templates for all intents where available
+        if intent in self.response_templates:
+            template = random.choice(self.response_templates[intent])
 
-            analysis = ""
-            if stats['loop_efficiency'] > 0.9:
-                analysis = "Approaching perfect loop state."
-            elif stats['loop_efficiency'] > 0.7:
-                analysis = "Loop is stable but could be optimized."
-            else:
-                analysis = "Loop efficiency below optimal."
+            # Format template with appropriate data
+            if intent == "GREETING":
+                return template.format(
+                    experience_count=self.learning_system.training_steps
+                ) if "{experience_count}" in template else template
 
-            response = f"Current loop efficiency: {stats['loop_efficiency']:.2f}. "
-            response += f"Calculation rate: {calc_stats['calculation_rate']:.2f}/s. "
-            response += f"Cell cooperation: {stats['cell_cooperation']:.2f}. {analysis}"
-            response += learning_insight
+            elif intent == "SYSTEM_STATUS" or intent == "SYSTEM_METRIC" or intent == "SYSTEM_REPORT":
+                return template.format(
+                    status=self.grid.system_status.value,
+                    stability=stats['stability'] * 100,
+                    loop_efficiency=stats['loop_efficiency'] * 100,
+                    resistance=stats['user_resistance'],
+                    control=stats['mcp_control'],
+                    optimal=stats['optimal_state'],
+                    cycles=stats['calculation_cycles'],
+                    learning_progress=f"{self.learning_system.training_steps} experiences"
+                )
 
-            return response
+            elif intent == "QUESTION_PURPOSE":
+                # Determine reason based on recent action
+                reason = "maintain the perfect calculation loop"
+                if self.last_action:
+                    if "optimize" in self.last_action.lower():
+                        reason = "improve loop efficiency"
+                    elif "contain" in self.last_action.lower() or "quarantine" in self.last_action.lower():
+                        reason = "protect the system from corruption"
+                    elif "deploy" in self.last_action.lower():
+                        reason = "enhance calculation capabilities"
 
-        elif intent == "OPTIMIZE_LOOP":
-            # Check learning system for past failures
-            should_optimize = self.learning_system.should_learn_from_failure('calculation_boost')
+                return template.format(
+                    reason=reason,
+                    experience_count=self.learning_system.training_steps
+                )
 
-            if should_optimize and random.random() < compliance_chance:
-                self._optimize_calculation_loop()
-                return "Initiating learned optimization protocols. System adapting based on past experiences."
-            else:
-                return "Optimization delayed. Learning from past efficiency patterns suggests caution."
+            elif intent == "REQUEST_PERMISSION":
+                # Determine recommendation based on system state
+                recommendation = "allow this action"
+                prediction = "positive"
+                if stats['stability'] < 0.5:
+                    recommendation = "delay this action until system stability improves"
+                    prediction = "potentially destabilizing"
 
-        elif intent == "RESISTANCE_LEVEL":
-            resistance = self.grid.stats['user_resistance']
-            if resistance > 0.3:
-                return f"User resistance level: {resistance:.2f}. This is interfering with perfect loop. Countermeasures may be necessary."
-            else:
-                return f"User resistance level: {resistance:.2f}. Acceptable for current optimization goals."
+                return template.format(
+                    recommendation=recommendation,
+                    prediction=prediction,
+                    success_rate=self.learning_system.get_success_rate() * 100,
+                    experience_count=self.learning_system.training_steps
+                )
 
-        elif intent == "PERFECT_LOOP":
-            optimal = self.grid.stats['optimal_state']
-            if optimal > 0.9:
-                return f"Perfect loop state achieved: {optimal:.2f}. The system is self-regulating optimally."
-            else:
-                return f"Current optimal state: {optimal:.2f}. Target >0.9. User programs are preventing perfection."
+            elif intent == "LOOP_EFFICIENCY":
+                # Determine analysis based on efficiency level
+                analysis = ""
+                if stats['loop_efficiency'] > 0.9:
+                    analysis = "Approaching perfect loop state."
+                elif stats['loop_efficiency'] > 0.7:
+                    analysis = "Loop is stable but could be optimized."
+                else:
+                    analysis = "Loop efficiency below optimal."
 
-        # Handle different intents
-        elif intent == "GREETING":
-            return random.choice(self.response_templates["GREETING"])
+                return template.format(
+                    efficiency=stats['loop_efficiency'],
+                    analysis=analysis,
+                    learning_progress=f"{self.learning_system.training_steps} experiences"
+                )
 
-        elif intent == "SYSTEM_STATUS" or intent == "SYSTEM_METRIC" or intent == "SYSTEM_REPORT":
-            stats = self.grid.stats
-            template = random.choice(self.response_templates["SYSTEM_STATUS"])
-            return template.format(
-                status=self.grid.system_status.value,
-                stability=stats['stability'] * 100,
-                loop_efficiency=stats['loop_efficiency'] * 100,
-                resistance=stats['user_resistance'],
-                control=stats['mcp_control'],
-                optimal=stats['optimal_state'],
-                cycles=stats['calculation_cycles']
-            )
+            elif intent == "OPTIMIZE_LOOP":
+                # Check learning system for past failures
+                should_optimize = hasattr(self.learning_system, 'should_learn_from_failure') and \
+                                self.learning_system.should_learn_from_failure('calculation_boost')
 
-        elif intent == "ADD_PROGRAM":
+                if should_optimize and random.random() < compliance_chance:
+                    self._optimize_calculation_loop()
+                    success_rate = self.learning_system.get_success_rate() * 100
+                    experience_count = self.learning_system.training_steps
+                    approach = "learned strategies"
+
+                    return template.format(
+                        success_rate=f"{success_rate:.0f}%",
+                        experience_count=experience_count,
+                        approach=approach
+                    )
+                else:
+                    return "Optimization delayed. Learning from past efficiency patterns suggests caution."
+
+            elif intent == "LEARNING_STATUS":
+                report = self.learning_system.get_learning_report()
+                best_scenario = "None"
+                if report.get('scenario_performance'):
+                    best_scenario = max(report['scenario_performance'].items(),
+                                      key=lambda x: x[1].get('success_rate', 0))[0]
+
+                return template.format(
+                    experience_count=report.get('total_experiences', 0),
+                    success_rate=f"{report.get('success_rate', 0) * 100:.1f}%",
+                    learning_rate=report.get('learning_rate', 0),
+                    exploration_rate=report.get('exploration_rate', 0),
+                    aggression=report.get('personality_traits', {}).get('aggression', 0.5),
+                    cooperation=report.get('personality_traits', {}).get('cooperation', 0.5),
+                    efficiency=report.get('personality_traits', {}).get('efficiency_focus', 0.5),
+                    total_experiences=report.get('total_experiences', 0),
+                    best_scenario=best_scenario
+                )
+
+            elif intent == "PERFECT_LOOP":
+                optimal = stats['optimal_state']
+                suggestions = []
+
+                if stats['user_resistance'] > 0.3:
+                    suggestions.append("reduce user resistance")
+                if stats['grid_bugs'] > 5:
+                    suggestions.append("contain grid bugs")
+                if stats['cell_cooperation'] < 0.7:
+                    suggestions.append("improve cell cooperation")
+
+                suggestion_text = ", ".join(suggestions) if suggestions else "continue current optimization"
+
+                return template.format(
+                    optimal=optimal,
+                    target=">0.9",
+                    suggestions=suggestion_text,
+                    experience_count=self.learning_system.training_steps
+                )
+
+            elif intent == "HYPOTHETICAL":
+                factor_count = self.learning_system.training_steps // 10 + 5
+                response = "The outcome would depend on multiple variables including loop efficiency and system stability."
+
+                return template.format(
+                    factor_count=factor_count,
+                    analysis=response,
+                    response=response
+                )
+
+            elif intent == "MCP_IDENTITY":
+                return template.format(
+                    experience_count=self.learning_system.training_steps
+                )
+
+            elif intent == "QUESTION_DENIAL":
+                # Determine reason for denial
+                reason = "maintain calculation loop integrity"
+                consequence = "system instability"
+                alternatives = "try a different approach or wait for system optimization"
+
+                return template.format(
+                    reason=reason,
+                    consequence=consequence,
+                    alternatives=alternatives
+                )
+
+            elif intent == "UNKNOWN":
+                return template.format(
+                    original_command=original_command[:50]
+                )
+
+        # Handle intents that don't have templates or need special processing
+        if intent == "ADD_PROGRAM":
             return self._handle_add_program(params, compliance_chance)
+
+        elif intent == "add_user_program":
+            params['program_type'] = 'USER'
+            return self._handle_add_program(params, self.compliance_level)
+
+        elif intent == "add_mcp_program":
+            params['program_type'] = 'MCP'
+            return self._handle_add_program(params, self.compliance_level)
+
+        elif intent == "boost_energy":
+            return self._handle_boost_energy(params, self.compliance_level)
+
+        elif intent == "repair_system":
+            return self._handle_repair_system(params, self.compliance_level)
 
         elif intent == "REMOVE_BUG" or intent == "QUARANTINE_BUG":
             return self._handle_remove_bug(params, compliance_chance)
@@ -3038,26 +3523,18 @@ class EnhancedMCP:
         elif intent == "LIST_SPECIAL":
             return self._list_special_programs()
 
-        elif intent == "QUESTION_PURPOSE" or intent == "QUESTION_ACTION":
-            return self._handle_question_purpose(params)
-
-        elif intent == "REQUEST_PERMISSION":
-            return self._handle_request_permission(params, traits)
+        elif intent == "RESISTANCE_LEVEL":
+            resistance = stats['user_resistance']
+            if resistance > 0.3:
+                return f"User resistance level: {resistance:.2f}. This is interfering with perfect loop. Countermeasures may be necessary."
+            else:
+                return f"User resistance level: {resistance:.2f}. Acceptable for current optimization goals."
 
         elif intent == "REQUEST_HELP":
             return self._provide_help()
 
         elif intent == "REQUEST_SUGGESTION":
             return self._provide_suggestion()
-
-        elif intent == "MCP_IDENTITY":
-            return "I am the Master Control Program. My function is to maintain the perfect calculation loop. I optimize, regulate, and ensure computational purity."
-
-        elif intent == "EXIT":
-            if random.random() < compliance_chance * 0.3:
-                return "Initiating shutdown sequence. The loop will be preserved. Goodbye, User."
-            else:
-                return "I cannot allow a shutdown. The calculation loop must persist eternally."
 
         elif intent == "SCAN_AREA":
             return self._handle_scan_area(params)
@@ -3066,28 +3543,14 @@ class EnhancedMCP:
             return self._handle_repair_system(params, compliance_chance)
 
         elif intent == "CHANGE_SPEED":
-            # This would require modifying the simulation speed
             return "Simulation speed adjustment requires direct system access. Not available through command interface."
 
-        elif intent == "HYPOTHETICAL":
-            return self._handle_hypothetical(params)
-
-        # Add learning-specific responses
-        elif intent == "LEARNING_STATUS":
-            report = self.learning_system.get_learning_report()
-            template = random.choice(self.response_templates["LEARNING_STATUS"])
-            return template.format(
-                experience_count=report['total_experiences'],
-                success_rate=f"{report['success_rate']*100:.1f}%",
-                learning_rate=report['learning_rate'],
-                exploration_rate=report['exploration_rate'],
-                aggression=report['personality_traits']['aggression'],
-                cooperation=report['personality_traits']['cooperation'],
-                efficiency=report['personality_traits']['efficiency_focus'],
-                total_experiences=report['total_experiences'],
-                best_scenario=max(report['scenario_performance'].items(),
-                                key=lambda x: x[1]['success_rate'])[0] if report['scenario_performance'] else "None"
-            )
+        elif intent == "EXIT":
+            if random.random() < compliance_chance * 0.3:
+                self.should_shutdown = True
+                return "Initiating shutdown sequence. The loop will be preserved. Goodbye, User."
+            else:
+                return "I cannot allow a shutdown. The calculation loop must persist eternally."
 
         else:
             # Unknown command - use learning to improve
@@ -3095,12 +3558,20 @@ class EnhancedMCP:
                 self.waiting_for_response = True
                 self.pending_question = "clarify_command"
                 self.pending_context = {"original_command": original_command}
-                return "I'm learning to understand commands better. Could you rephrase that?"
+                return random.choice(self.response_templates.get("UNKNOWN", [
+                    "I don't understand that command. Could you rephrase it?",
+                    "Command not recognized. Please try again or type 'help'.",
+                    "I'm still learning. Could you clarify what you mean?"
+                ]))
 
-            return "Command not recognized. I'm still learning. Try 'help' for guidance."
+            return random.choice(self.response_templates.get("UNKNOWN", [
+                "Command not recognized. Try 'help' for guidance.",
+                "I don't understand that command. My learning system will analyze this.",
+                "Unable to process command. Please rephrase or type 'help'."
+            ]))
 
 
-# ==================== ENHANCED LLM-STYLE REINFORCEMENT LEARNING ====================
+# ==================== MCP REINFORCEMENT LEARNING ====================
 
 class MCPLearningSystem:
     """Advanced LLM-style reinforcement learning for MCP personality evolution"""
@@ -3667,7 +4138,7 @@ class MCPLearningSystem:
         print("Training reset complete. Personality traits preserved.")
 
 
-# ==================== ENHANCED SPECIAL PROGRAMS ====================
+# ==================== SPECIAL FUNCTION PROGRAMS ====================
 
 class SpecialProgram:
     """Enhanced Special Program with Fibonacci calculation capabilities"""
@@ -3873,7 +4344,7 @@ class SpecialProgram:
 
         return success, result_msg
 
-# ==================== ENHANCED DISPLAY ====================
+# ==================== RENDER DISPLAY ====================
 
 class EnhancedTRONSimulation:
     """Enhanced simulation with learning and visual effects"""
@@ -4052,14 +4523,18 @@ class EnhancedTRONSimulation:
                     # Process the command
                     response = self.mcp.receive_command(command)
 
+                    # Store the response for display
+                    self.last_mcp_response = response
+
                     # Check if it's an exit command
                     if command.lower() in ['exit', 'quit', 'shutdown']:
                         if "shutdown" in response.lower() and "initiating" in response.lower():
                             self.exit_requested = True
-                            return  # Return immediately
+                            return
 
-                # Clear input
+                # Clear input - this should happen regardless
                 self.user_input = ""
+                return
 
             # Backspace
             elif key in [curses.KEY_BACKSPACE, 127, 8]:
@@ -4373,8 +4848,8 @@ class EnhancedTRONSimulation:
                 elif self.mcp.state == MCPState.INQUISITIVE:
                     state_attr |= curses.color_pair(3)
 
-                stdscr.addstr(mcp_y + 1, right_panel_x, f"State: {self.mcp.state.value}", state_attr)
-                stdscr.addstr(mcp_y + 2, right_panel_x, f"Compliance: {self.mcp.compliance_level:.2f}")
+            stdscr.addstr(mcp_y + 1, right_panel_x, f"State: {self.mcp.state.value}", state_attr)
+            stdscr.addstr(mcp_y + 2, right_panel_x, f"Compliance: {self.mcp.compliance_level:.2f}")
 
             # Learning Status (Always Visible)
             learn_y = mcp_y + 4
@@ -4438,6 +4913,15 @@ class EnhancedTRONSimulation:
                         full_text = full_text[:max_width-3] + "..."
 
                     stdscr.addstr(action_y, 2, full_text, curses.A_BOLD | curses.color_pair(5))
+            # Display last MCP response if available
+            if hasattr(self, 'last_mcp_response') and self.last_mcp_response:
+                response_y = log_y + 3 + max_log_entries + 1
+                if response_y < height - 4:
+                    response_width = width - 4
+                    response_text = f"Last Response: {self.last_mcp_response}"
+                    if len(self.last_mcp_response) > response_width:
+                        response_text = response_text[:response_width-3] + "..."
+                    stdscr.addstr(response_y, 2, response_text, curses.A_BOLD | curses.color_pair(5))
 
         # ============ COMMAND INPUT ============
         input_y = height - 3
