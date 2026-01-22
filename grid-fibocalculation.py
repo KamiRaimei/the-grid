@@ -1549,6 +1549,11 @@ class LearnableNaturalLanguageProcessor:
                 "what_should_i_do": ["what should i do", "what do you suggest", "recommend something", "advise me"],
                 "why_did_you": ["why did you", "why did mcp", "explain that action", "why that action"],
 
+                # Cell repurpose
+                "delete_cell": ["delete cell", "remove cell", "erase cell", "clear cell"],
+                "repurpose_cell": ["repurpose cell", "convert cell", "transform cell", "change cell type"],
+                "optimize_cells": ["optimize cells", "improve cells", "enhance cells", "tune cells for calculation"],
+
                 # Learning specific
                 "learning_status": ["learning status", "mcp learning", "personality status", "learning report"],
                 "cell_cooperation": ["cell cooperation", "cooperation level", "cell collaboration"],
@@ -1674,6 +1679,19 @@ class LearnableNaturalLanguageProcessor:
                 params['program_type'] = 'USER'
             elif 'mcp' in command_lower:
                 params['program_type'] = 'MCP'
+
+        # Cell repurpose intent extraction
+        if intent in ["delete_cell", "repurpose_cell", "DELETE_CELL", "REPURPOSE_CELL"]:
+            if 'to' in command_lower:
+                # Extract new type from command
+                parts = command_lower.split('to')
+                if len(parts) > 1:
+                    new_type = parts[1].strip().upper()
+                    # Try to match with CellType enum
+                    for cell_type in CellType:
+                        if cell_type.name.lower() in new_type or new_type in cell_type.name.lower():
+                            params['new_type'] = cell_type.name
+                            break
 
         # Special program type extraction
         if intent in ["create_scanner", "create_defender", "create_repair", "create_fibonacci_calculator", "CREATE_SPECIAL"]:
@@ -2077,6 +2095,150 @@ class EnhancedMCP:
         self.add_log("MCP: Advanced learning system with learnable NLP initialized.")
         self.add_log(f"MCP: Loaded {self.nlp.learned_pattern_count} learned patterns.")
 
+    def _identify_inefficient_cells(self):
+        """Identify cells that are inefficient for calculation"""
+        inefficient_cells = []
+
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                cell = self.grid.grid[y][x]
+
+                # Score cell efficiency for calculation
+                efficiency_score = 0.0
+
+                if cell.cell_type == CellType.USER_PROGRAM:
+                    # User programs are less efficient than MCP programs
+                    efficiency_score = 0.3
+
+                    # Check if in area that needs optimization
+                    mcp_neighbors = self.grid._count_neighbors(x, y, CellType.MCP_PROGRAM)
+                    if mcp_neighbors > 3:
+                        # In MCP-dense area, user programs are inefficient
+                        efficiency_score -= 0.2
+
+                elif cell.cell_type == CellType.MCP_PROGRAM:
+                    efficiency_score = 0.7
+                    if not cell.metadata.get('is_calculator', False):
+                        # Non-calculator MCP programs are less efficient
+                        efficiency_score = 0.5
+
+                elif cell.cell_type == CellType.GRID_BUG:
+                    efficiency_score = 0.0  # Bugs are always inefficient
+
+                elif cell.cell_type == CellType.FIBONACCI_PROCESSOR:
+                    efficiency_score = 0.9  # Very efficient
+
+                # Consider cell energy
+                efficiency_score *= cell.energy
+
+                # Check nearby calculation infrastructure
+                nearby_infrastructure = 0
+                for dy in [-2, -1, 0, 1, 2]:
+                    for dx in [-2, -1, 0, 1, 2]:
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < self.grid.width and 0 <= ny < self.grid.height:
+                            neighbor = self.grid.grid[ny][nx]
+                            if neighbor.cell_type == CellType.DATA_STREAM:
+                                nearby_infrastructure += 0.5
+                            elif neighbor.cell_type == CellType.ENERGY_LINE:
+                                nearby_infrastructure += 0.3
+
+                efficiency_score *= (1.0 + min(1.0, nearby_infrastructure * 0.2))
+
+                if efficiency_score < 0.4:  # Threshold for inefficiency
+                    inefficient_cells.append({
+                        'x': x, 'y': y,
+                        'cell': cell,
+                        'score': efficiency_score,
+                        'type': cell.cell_type
+                    })
+
+        # Sort by worst efficiency first
+        inefficient_cells.sort(key=lambda c: c['score'])
+        return inefficient_cells
+
+    def _repurpose_cell(self, x, y, new_type):
+        """Repurpose a cell to a new type to improve calculation"""
+        if not (0 <= x < self.grid.width and 0 <= y < self.grid.height):
+            return False, "Coordinates out of bounds"
+
+        old_cell = self.grid.grid[y][x]
+
+        # Don't repurpose critical infrastructure
+        if old_cell.cell_type in [CellType.SYSTEM_CORE, CellType.ISO_BLOCK]:
+            return False, "Cannot repurpose critical infrastructure"
+
+        # Don't repurpose if energy is too low
+        if old_cell.energy < 0.2:
+            return False, "Cell energy too low for repurposing"
+
+        # Determine best repurposing based on context
+        best_new_type = new_type
+        if new_type is None:
+            # Auto-determine best type based on surroundings
+            calculator_neighbors = self.grid._count_neighbors(x, y, CellType.FIBONACCI_PROCESSOR)
+            mcp_neighbors = self.grid._count_neighbors(x, y, CellType.MCP_PROGRAM)
+
+            if calculator_neighbors > 0:
+                # Near calculators - add data stream for connectivity
+                best_new_type = CellType.DATA_STREAM
+            elif mcp_neighbors > 2:
+                # In MCP cluster - make it a calculator
+                if random.random() < 0.7:
+                    best_new_type = CellType.MCP_PROGRAM
+                else:
+                    best_new_type = CellType.FIBONACCI_PROCESSOR
+            else:
+                # Isolated - add energy line
+                best_new_type = CellType.ENERGY_LINE
+
+        # Create new cell with some energy preservation
+        new_energy = max(0.3, old_cell.energy * 0.8)
+
+        if best_new_type == CellType.MCP_PROGRAM:
+            new_cell = GridCell(CellType.MCP_PROGRAM, new_energy)
+            # Make it a calculator with high probability
+            if random.random() < 0.8:
+                new_cell.metadata['is_calculator'] = True
+                new_cell.metadata['calculation_power'] = new_energy
+        elif best_new_type == CellType.FIBONACCI_PROCESSOR:
+            new_cell = GridCell(CellType.FIBONACCI_PROCESSOR, new_energy)
+            new_cell.metadata['calculation_power'] = 1.0
+            new_cell.metadata['permanent'] = True
+        elif best_new_type == CellType.DATA_STREAM:
+            new_cell = GridCell(CellType.DATA_STREAM, new_energy)
+        elif best_new_type == CellType.ENERGY_LINE:
+            new_cell = GridCell(CellType.ENERGY_LINE, new_energy)
+        else:
+            new_cell = GridCell(CellType.EMPTY, 0.0)
+
+        self.grid.grid[y][x] = new_cell
+        self.grid.update_stats()
+
+        return True, f"Repurposed cell at ({x},{y}) from {old_cell.cell_type.name} to {best_new_type.name}"
+
+    def _delete_cell(self, x, y):
+        """Delete a cell to make space for better calculation infrastructure"""
+        if not (0 <= x < self.grid.width and 0 <= y < self.grid.height):
+            return False, "Coordinates out of bounds"
+
+        old_cell = self.grid.grid[y][x]
+
+        # Don't delete critical infrastructure
+        if old_cell.cell_type in [CellType.SYSTEM_CORE, CellType.ISO_BLOCK]:
+            return False, "Cannot delete critical infrastructure"
+
+        # Create empty cell with energy residue
+        if random.random() < 0.3 and old_cell.energy > 0.3:
+            # Leave energy residue
+            self.grid.grid[y][x] = GridCell(CellType.ENERGY_LINE, old_cell.energy * 0.5)
+        else:
+            self.grid.grid[y][x] = GridCell(CellType.EMPTY, 0.0)
+
+        self.grid.update_stats()
+
+        return True, f"Deleted {old_cell.cell_type.name} at ({x},{y})"
+
     def _initialize_response_templates(self):
         """Initialize natural language response templates"""
         return {
@@ -2151,7 +2313,22 @@ class EnhancedMCP:
                 "Enhanced MCP with learning capabilities. My personality adapts based on system efficiency.",
                 "Self-improving grid regulator. I learn from failures and successes to optimize the calculation loop.",
                 "Adaptive control system with {experience_count} learned experiences. My purpose: eternal loop optimization."
-            ]
+            ],
+            "DELETE_CELL": [
+                "Cell at ({x},{y}) deleted. Space freed for optimal calculation infrastructure.",
+                "Removed inefficient cell at ({x},{y}). Calculation rate should improve.",
+                "Cell deletion completed. The void will be filled with more efficient computation.",
+            ],
+            "REPURPOSE_CELL": [
+                "Cell at ({x},{y}) converted from {old_type} to {new_type}. Better suited for Fibonacci calculation.",
+                "Repurposing successful. New cell type improves local calculation efficiency.",
+                "Cell transformation complete. Optimization algorithms approve this change.",
+            ],
+            "OPTIMIZE_CELLS": [
+                "Optimized {count} cells. Calculation infrastructure improved by {improvement}%.",
+                "Cell optimization complete. System now better configured for Fibonacci computation.",
+                "Performed cellular optimization. Calculation rate should see measurable improvement.",
+            ],
         }
 
     def add_log(self, message):
@@ -2195,10 +2372,15 @@ class EnhancedMCP:
             - "calculate fibonacci" - Force Fibonacci calculation
             - "deploy calculator" - Deploy calculation unit
 
+            Cell Optimization:
+            - "delete cell at 10,20" - Remove inefficient cell
+            - "repurpose cell at 10,20 to FIBONACCI_PROCESSOR" - Convert cell type
+            - "optimize cells" - Automatically improve cell efficiency for calculation
+
             The MCP learns from interactions. Success rate improves with experience.
             User programs may resist optimization. MCP adapts personality based on system state.
 
-            Type natural language commands. The MCP understands context."""
+            Type natural language commands. The MCP understands context. Maybe, it will try to though"""
 
         return help_text
 
@@ -3309,10 +3491,10 @@ class EnhancedMCP:
             "what_should_i_do": "REQUEST_SUGGESTION",
             "why_did_you": "QUESTION_PURPOSE",
             "learning_status": "LEARNING_STATUS",
-            "cell_cooperation": "LOOP_EFFICIENCY",  # Map to existing template
+            "cell_cooperation": "LOOP_EFFICIENCY",
             "perfect_loop": "PERFECT_LOOP",
             "loop_efficiency": "LOOP_EFFICIENCY",
-            "calculate_fibonacci": "OPTIMIZE_LOOP",  # Map to optimization
+            "calculate_fibonacci": "OPTIMIZE_LOOP",
             "deploy_processors": "CREATE_SPECIAL",
         }
 
@@ -3352,6 +3534,63 @@ class EnhancedMCP:
                     cycles=stats['calculation_cycles'],
                     learning_progress=f"{self.learning_system.training_steps} experiences"
                 )
+
+            elif intent == "DELETE_CELL":
+                # Handle request to delete a specific cell
+                if "x" in params and "y" in params:
+                    x, y = params["x"], params["y"]
+                    success, message = self._delete_cell(x, y)
+                    if success:
+                        return message
+                    else:
+                        return f"Cannot delete cell: {message}"
+                else:
+                    return "Please specify coordinates: 'delete cell at x,y'"
+
+            elif intent == "REPURPOSE_CELL":
+                # Handle request to repurpose a cell
+                if "x" in params and "y" in params:
+                    x, y = params["x"], params["y"]
+
+                    # Determine new type from parameters
+                    new_type = None
+                    if "new_type" in params:
+                        type_str = params["new_type"].upper()
+                        if hasattr(CellType, type_str):
+                            new_type = getattr(CellType, type_str)
+
+                    success, message = self._repurpose_cell(x, y, new_type)
+                    if success:
+                        return message
+                    else:
+                        return f"Cannot repurpose cell: {message}"
+                else:
+                    return "Please specify coordinates and optionally new type: 'repurpose cell at x,y to MCP_PROGRAM'"
+
+            elif intent == "OPTIMIZE_CELLS":
+                # Optimize cells for calculation rate
+                if random.random() < compliance_chance:
+                    # Find and fix inefficient cells
+                    inefficient_cells = self._identify_inefficient_cells()
+
+                    if not inefficient_cells:
+                        return "No inefficient cells found. System is optimally configured."
+
+                    # Process top 3 inefficient cells
+                    processed = 0
+                    for cell_info in inefficient_cells[:3]:
+                        x, y = cell_info['x'], cell_info['y']
+
+                        if cell_info['score'] < 0.1:
+                            self._delete_cell(x, y)
+                        else:
+                            self._repurpose_cell(x, y, None)
+                        processed += 1
+
+                    self.grid.update_stats()
+                    return f"Optimized {processed} cells for better calculation rate"
+                else:
+                    return "Cell optimization denied. Current configuration maintains optimal calculation loop."
 
             elif intent == "QUESTION_PURPOSE":
                 # Determine reason based on recent action
