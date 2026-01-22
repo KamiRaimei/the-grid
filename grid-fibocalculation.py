@@ -2914,6 +2914,37 @@ class EnhancedMCP:
                     action = f"Converted MCP program at ({x},{y}) to calculator"
                     action_type = "calculator_conversion"
 
+        # PRIORITY 6: Delete/repurpose inefficient cells
+        if action is None and random.random() < 0.4 * aggression_mod:
+            # Find inefficient cells
+            inefficient_cells = self._identify_inefficient_cells()
+
+            if inefficient_cells:
+                # Take action on worst cell
+                target_cell = inefficient_cells[0]
+                x, y = target_cell['x'], target_cell['y']
+
+                # Decide action based on cell type and context
+                if target_cell['type'] == CellType.GRID_BUG:
+                    # Always delete bugs
+                    success, message = self._delete_cell(x, y)
+                    if success:
+                        action = message
+                        action_type = "inefficiency_cleanup"
+                elif target_cell['score'] < 0.2:  # Very inefficient
+                    # Delete very inefficient cells
+                    success, message = self._delete_cell(x, y)
+                    if success:
+                        action = message
+                        action_type = "inefficiency_cleanup"
+                else:
+                    # Repurpose moderately inefficient cells
+                    success, message = self._repurpose_cell(x, y, None)
+                    if success:
+                        action = message
+                        action_type = "cell_repurposing"
+
+
         # If no priority action taken, fall back to learned action or default
         if action is None:
             if suggested_action and random.random() < 0.7:
