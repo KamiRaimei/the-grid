@@ -4641,7 +4641,7 @@ class EnhancedTRONSimulation:
 
         # Render configuration - optimization
         self.last_frame_time = time.time()
-        self.target_fps = 30  # FPS Limit
+        self.target_fps = 60  # FPS Limit
 
     def run(self):
         """Main loop with rate limiting"""
