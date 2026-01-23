@@ -2239,6 +2239,125 @@ class EnhancedMCP:
 
         return True, f"Deleted {old_cell.cell_type.name} at ({x},{y})"
 
+    def _cleanup_inefficient_cells(self):
+        """Clean up inefficient cells to free space for calculation infrastructure"""
+        deleted = 0
+        inefficient_cells = self._identify_inefficient_cells()
+
+        # Delete the worst 3 cells
+        for cell_info in inefficient_cells[:3]:
+            x, y = cell_info['x'], cell_info['y']
+            if cell_info['score'] < 0.2:  # Very inefficient
+                success, _ = self._delete_cell(x, y)
+                if success:
+                    deleted += 1
+
+        return deleted
+
+    def _repurpose_inefficient_cells(self):
+        """Repurpose inefficient cells for calculation"""
+        repurposed = 0
+        inefficient_cells = self._identify_inefficient_cells()
+
+        # Repurpose moderately inefficient cells
+        for cell_info in inefficient_cells[:5]:
+            if 0.2 <= cell_info['score'] < 0.4:  # Moderately inefficient
+                x, y = cell_info['x'], cell_info['y']
+                success, _ = self._repurpose_cell(x, y, None)
+                if success:
+                    repurposed += 1
+
+        return repurposed
+
+    def _optimize_cell_efficiency(self):
+        """Comprehensive cell efficiency optimization"""
+        optimized = 0
+
+        # Find areas with poor calculation efficiency
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                cell = self.grid.grid[y][x]
+
+                # Check if this cell type is suboptimal for current location
+                if self._is_cell_misplaced(x, y, cell):
+                    # Repurpose to better type based on surroundings
+                    success, _ = self._repurpose_cell(x, y, None)
+                    if success:
+                        optimized += 1
+
+                # Check if isolated calculator exists
+                elif cell.cell_type == CellType.FIBONACCI_PROCESSOR:
+                    calculator_neighbors = 0
+                    for dy in [-2, -1, 0, 1, 2]:
+                        for dx in [-2, -1, 0, 1, 2]:
+                            if dx == 0 and dy == 0:
+                                continue
+                            nx, ny = x + dx, y + dy
+                            if 0 <= nx < self.grid.width and 0 <= ny < self.grid.height:
+                                neighbor = self.grid.grid[ny][nx]
+                                if neighbor.cell_type in [CellType.FIBONACCI_PROCESSOR,
+                                                         CellType.MCP_PROGRAM]:
+                                    calculator_neighbors += 1
+
+                    if calculator_neighbors == 0:
+                        # Isolated calculator - add support infrastructure
+                        for dy in [-1, 0, 1]:
+                            for dx in [-1, 0, 1]:
+                                if dx == 0 and dy == 0:
+                                    continue
+                                nx, ny = x + dx, y + dy
+                                if 0 <= nx < self.grid.width and 0 <= ny < self.grid.height:
+                                    if self.grid.grid[ny][nx].cell_type == CellType.EMPTY:
+                                        self.grid.grid[ny][nx] = GridCell(CellType.DATA_STREAM, 0.7)
+                                        optimized += 1
+                                        break
+
+        return optimized
+
+    def _is_cell_misplaced(self, x, y, cell):
+        """Determine if a cell is in a suboptimal location for its type"""
+        # User program in MCP-dense area
+        if cell.cell_type == CellType.USER_PROGRAM:
+            mcp_neighbors = self.grid._count_neighbors(x, y, CellType.MCP_PROGRAM)
+            if mcp_neighbors > 4:
+                return True
+
+        # MCP program without calculator flag in calculator-dense area
+        elif cell.cell_type == CellType.MCP_PROGRAM:
+            if not cell.metadata.get('is_calculator', False):
+                calculator_neighbors = 0
+                for dy in [-2, -1, 0, 1, 2]:
+                    for dx in [-2, -1, 0, 1, 2]:
+                        if dx == 0 and dy == 0:
+                            continue
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < self.grid.width and 0 <= ny < self.grid.height:
+                            neighbor = self.grid.grid[ny][nx]
+                            if neighbor.cell_type == CellType.FIBONACCI_PROCESSOR:
+                                calculator_neighbors += 1
+
+                if calculator_neighbors > 3:
+                    return True
+
+        # Data stream with no adjacent calculators
+        elif cell.cell_type == CellType.DATA_STREAM:
+            calculator_neighbors = 0
+            for dy in [-1, 0, 1]:
+                for dx in [-1, 0, 1]:
+                    if dx == 0 and dy == 0:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < self.grid.width and 0 <= ny < self.grid.height:
+                        neighbor = self.grid.grid[ny][nx]
+                        if neighbor.cell_type in [CellType.FIBONACCI_PROCESSOR,
+                                                 CellType.MCP_PROGRAM]:
+                            calculator_neighbors += 1
+
+            if calculator_neighbors == 0:
+                return True
+
+        return False
+
     def _initialize_response_templates(self):
         """Initialize natural language response templates"""
         return {
@@ -3052,6 +3171,12 @@ class EnhancedMCP:
                 'enhance_collaboration'
             ])
 
+        if state.get('energy_level', 0) > 0.7 and state.get('calculation_rate', 0) < 150:
+            actions.extend([
+                'inefficiency_cleanup',
+                'cell_repurposing',
+                'optimize_cell_efficiency'
+            ])
         # Add maintenance actions
         actions.extend([
             'maintain_energy_grid',
@@ -3112,19 +3237,19 @@ class EnhancedMCP:
                 deleted = self._cleanup_inefficient_cells()
                 result['success'] = deleted > 0
                 result['message'] = f"Cleaned up {deleted} inefficient cells to improve calculation rate"
-                
+
             elif action_type == 'cell_repurposing':
                 # Repurpose cells for better calculation
                 repurposed = self._repurpose_inefficient_cells()
                 result['success'] = repurposed > 0
                 result['message'] = f"Repurposed {repurposed} cells for optimal calculation"
-                
+
             elif action_type == 'optimize_cell_efficiency':
                 # Comprehensive cell optimization
                 optimized = self._optimize_cell_efficiency()
                 result['success'] = optimized > 0
                 result['message'] = f"Optimized {optimized} cells for maximum calculation efficiency"
-                
+
             else:
                 # Default maintenance action
                 result['message'] = "Performing system maintenance"
