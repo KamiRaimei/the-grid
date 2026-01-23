@@ -3107,7 +3107,24 @@ class EnhancedMCP:
                 maintained = self._maintain_energy_grid()
                 result['success'] = maintained > 0
                 result['message'] = f"Added {maintained} energy lines for system stability"
-
+            elif action_type == 'inefficiency_cleanup':
+                # Delete inefficient cells
+                deleted = self._cleanup_inefficient_cells()
+                result['success'] = deleted > 0
+                result['message'] = f"Cleaned up {deleted} inefficient cells to improve calculation rate"
+                
+            elif action_type == 'cell_repurposing':
+                # Repurpose cells for better calculation
+                repurposed = self._repurpose_inefficient_cells()
+                result['success'] = repurposed > 0
+                result['message'] = f"Repurposed {repurposed} cells for optimal calculation"
+                
+            elif action_type == 'optimize_cell_efficiency':
+                # Comprehensive cell optimization
+                optimized = self._optimize_cell_efficiency()
+                result['success'] = optimized > 0
+                result['message'] = f"Optimized {optimized} cells for maximum calculation efficiency"
+                
             else:
                 # Default maintenance action
                 result['message'] = "Performing system maintenance"
