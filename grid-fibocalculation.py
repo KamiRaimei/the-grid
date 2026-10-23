@@ -490,6 +490,9 @@ class TRONGrid:
         self.stats = {
             'user_programs': 0,
             'mcp_programs': 0,
+            'user_program_multiplications': 0,
+            'user_program_revolts': 0,
+            'mcp_suppressed_user_programs': 0,
             'grid_bugs': 0,
             'special_programs': 0,
             'energy_level': 0.0,
@@ -517,6 +520,9 @@ class TRONGrid:
         self.loop_iterations = 0
         self.loop_optimization = 0.5
         self.user_interference_level = 0.0
+        self.user_program_multiplications = 0
+        self.user_program_revolts = 0
+        self.mcp_suppressed_user_programs = 0
 
         # User resistance tracking
         self.user_program_resistance = defaultdict(int)
@@ -649,37 +655,75 @@ class TRONGrid:
                           (1.0 - self.stats['entropy']) * 0.3)
             self.loop_optimization = 0.7 * self.loop_optimization + 0.3 * loop_quality
 
-        # User programs have a chance to resist MCP control
-        user_program_positions = []
+        # User programs multiply more often under MCP control or poor grid performance.
+        mcp_control_pressure = max(0.0, min(
+            1.0, (self.stats['mcp_control'] - 0.65) / 0.35
+        ))
+        efficiency_pressure = max(0.0, min(
+            1.0, (0.65 - self.stats['loop_efficiency']) / 0.65
+        ))
+        multiplication_chance = min(
+            0.12, 0.01 + 0.05 * mcp_control_pressure + 0.04 * efficiency_pressure
+        )
+        revolt_chance = min(
+            0.25, 0.18 * mcp_control_pressure + 0.05 * efficiency_pressure
+        )
+        reserved_user_cells = set()
+        spawned_users = 0
+
         for y in range(self.height):
             for x in range(self.width):
                 cell = self.grid[y][x]
                 if cell.cell_type == CellType.USER_PROGRAM:
-                    user_program_positions.append((x, y, cell))
+                    if random.random() < revolt_chance:
+                        mcp_neighbors = [
+                            (x + dx, y + dy)
+                            for dx, dy in self.neighbor_offsets_8
+                            if 0 <= x + dx < self.width and 0 <= y + dy < self.height
+                            and self.grid[y + dy][x + dx].cell_type == CellType.MCP_PROGRAM
+                        ]
+                        if mcp_neighbors:
+                            tx, ty = random.choice(mcp_neighbors)
+                            new_grid[ty][tx] = GridCell(
+                                CellType.USER_PROGRAM, min(0.8, cell.energy * 0.8)
+                            )
+                            reserved_user_cells.add((tx, ty))
+                            self.user_program_revolts += 1
+                            spawned_users += 1
+                            continue
 
-                    # Chance to resist MCP influence
-                    if random.random() < self.stats['user_resistance']:
-                        # User program resists - might spawn more user programs or disrupt MCP
-                        if random.random() < 0.1:
-                            # Spawn adjacent user program
-                            for dx, dy in [(-1,0), (1,0), (0,-1), (0,1)]:
-                                nx, ny = x + dx, y + dy
-                                if 0 <= nx < self.width and 0 <= ny < self.height:
-                                    if self.grid[ny][nx].cell_type == CellType.EMPTY:
-                                        new_grid[ny][nx] = GridCell(CellType.USER_PROGRAM, 0.7)
-                                        break
+                    if random.random() < multiplication_chance:
+                        empty_neighbors = [
+                            (x + dx, y + dy)
+                            for dx, dy in self.neighbor_offsets_8
+                            if 0 <= x + dx < self.width and 0 <= y + dy < self.height
+                            and self.grid[y + dy][x + dx].cell_type == CellType.EMPTY
+                            and (x + dx, y + dy) not in reserved_user_cells
+                        ]
+                        if empty_neighbors:
+                            tx, ty = random.choice(empty_neighbors)
+                            new_grid[ty][tx] = GridCell(
+                                CellType.USER_PROGRAM, min(0.8, cell.energy * 0.8)
+                            )
+                            reserved_user_cells.add((tx, ty))
+                            self.user_program_multiplications += 1
+                            spawned_users += 1
 
         # Track user interference
-        user_additions = sum(1 for y in range(self.height)
-                           for x in range(self.width)
-                           if new_grid[y][x].cell_type == CellType.USER_PROGRAM)
-
-        self.user_interference_level = 0.7 * self.user_interference_level + 0.3 * (user_additions / 10)
+        user_population = sum(
+            cell.cell_type == CellType.USER_PROGRAM
+            for row in self.grid for cell in row
+        )
+        self.user_interference_level = 0.7 * self.user_interference_level + 0.3 * (
+            min(1.0, spawned_users / max(1, user_population))
+        )
 
         # PHASE: Program movement and interaction
         for y in range(self.height):
             for x in range(self.width):
                 cell = self.grid[y][x]
+                if new_grid[y][x].cell_type == CellType.USER_PROGRAM:
+                    continue
 
                 # USER PROGRAMS - May resist optimal configuration
                 if cell.cell_type == CellType.USER_PROGRAM:
@@ -690,7 +734,8 @@ class TRONGrid:
                         nx, ny = x + dx, y + dy
                         if 0 <= nx < self.width and 0 <= ny < self.height:
                             target_cell = self.grid[ny][nx]
-                            if target_cell.cell_type == CellType.EMPTY:
+                            if (target_cell.cell_type == CellType.EMPTY and
+                                (nx, ny) not in reserved_user_cells):
                                 new_grid[ny][nx] = GridCell(
                                     cell.cell_type,
                                     cell.energy * 0.95,
@@ -711,7 +756,8 @@ class TRONGrid:
                         nx, ny = x + dx, y + dy
                         if 0 <= nx < self.width and 0 <= ny < self.height:
                             target_cell = self.grid[ny][nx]
-                            if target_cell.cell_type == CellType.EMPTY:
+                            if (target_cell.cell_type == CellType.EMPTY and
+                                (nx, ny) not in reserved_user_cells):
                                 new_grid[ny][nx] = GridCell(
                                     cell.cell_type,
                                     cell.energy * 0.95,
@@ -1176,8 +1222,12 @@ class TRONGrid:
         # Calculate user resistance (chance user programs resist MCP control)
         user_resistance = min(0.5, counts[CellType.USER_PROGRAM] / total_cells * 2 if total_cells > 0 else 0)
 
-        # Calculate MCP control level
-        mcp_control = min(1.0, counts[CellType.MCP_PROGRAM] / (counts[CellType.USER_PROGRAM] + 0.1))
+        # Express control as MCP's share of the user/MCP program population.
+        total_control_programs = counts[CellType.MCP_PROGRAM] + counts[CellType.USER_PROGRAM]
+        mcp_control = (
+            counts[CellType.MCP_PROGRAM] / total_control_programs
+            if total_control_programs else 0.5
+        )
 
         # Get calculation stats
         calc_stats = self.fibonacci_calculator.get_calculation_stats()
@@ -1187,6 +1237,9 @@ class TRONGrid:
         self.stats.update({
             'user_programs': counts[CellType.USER_PROGRAM],
             'mcp_programs': counts[CellType.MCP_PROGRAM],
+            'user_program_multiplications': self.user_program_multiplications,
+            'user_program_revolts': self.user_program_revolts,
+            'mcp_suppressed_user_programs': self.mcp_suppressed_user_programs,
             'grid_bugs': counts[CellType.GRID_BUG],
             'special_programs': special_program_count,
             'energy_level': total_energy / total_cells if total_cells > 0 else 0,
@@ -1415,6 +1468,8 @@ class TRONGrid:
     def add_program(self, x, y, cell_type, energy=0.8):
         """Add a program with enhanced visual initialization"""
         if 0 <= x < self.width and 0 <= y < self.height:
+            if self.grid[y][x].cell_type != CellType.EMPTY:
+                return False
             cell = GridCell(cell_type, energy)
 
             # Special initialization for certain cell types
@@ -2645,16 +2700,25 @@ class EnhancedMCP:
             # Find location
             if location == "NEARBY":
                 # Find near center
-                x = self.grid.width // 2 + random.randint(-5, 5)
-                y = self.grid.height // 2 + random.randint(-5, 5)
+                x = max(0, min(self.grid.width - 1,
+                               self.grid.width // 2 + random.randint(-5, 5)))
+                y = max(0, min(self.grid.height - 1,
+                               self.grid.height // 2 + random.randint(-5, 5)))
             elif location == "CENTER":
                 x = self.grid.width // 2
                 y = self.grid.height // 2
             elif "x" in params and "y" in params:
                 x, y = params["x"], params["y"]
             else:
-                # Random location
-                x, y = random.randint(0, self.grid.width-1), random.randint(0, self.grid.height-1)
+                empty_cells = [
+                    (column, row)
+                    for row in range(self.grid.height)
+                    for column in range(self.grid.width)
+                    if self.grid.grid[row][column].cell_type == CellType.EMPTY
+                ]
+                if not empty_cells:
+                    return "Could not add program: the grid has no empty cells"
+                x, y = random.choice(empty_cells)
 
             # Map program type to cell type
             cell_type_map = {
@@ -3518,18 +3582,7 @@ class EnhancedMCP:
         """Enhanced optimization with learning"""
         previous_efficiency = self.grid.stats['loop_efficiency']
 
-        # Use learned aggression level
-        aggression = self.learning_system.personality_traits['aggression']
-
-        # Remove inefficient user programs based on learned aggression
-        removed = 0
-        for y in range(self.grid.height):
-            for x in range(self.grid.width):
-                if self.grid.grid[y][x].cell_type == CellType.USER_PROGRAM:
-                    remove_chance = 0.3 * aggression
-                    if random.random() < remove_chance:
-                        self.grid.grid[y][x] = GridCell(CellType.MCP_PROGRAM, 0.9)
-                        removed += 1
+        suppressed = self._suppress_user_programs()
 
         # Add calculation infrastructure based on learned efficiency focus
         efficiency_focus = self.learning_system.personality_traits['efficiency_focus']
@@ -3560,7 +3613,54 @@ class EnhancedMCP:
             done=False
         )
 
-        self.add_log(f"MCP: Optimized loop using learned strategies. Efficiency change: {efficiency_change:+.3f}")
+        self.add_log(
+            f"MCP: Optimized loop using learned strategies. Suppressed {suppressed} "
+            f"user program(s); efficiency change: {efficiency_change:+.3f}"
+        )
+
+    def _suppress_user_programs(self):
+        """Suppress a limited number of user programs only during measurable degradation."""
+        stats = self.grid.stats
+        user_count = stats.get('user_programs', 0)
+        total_programs = user_count + stats.get('mcp_programs', 0)
+        if user_count == 0 or total_programs == 0:
+            return 0
+
+        user_share = user_count / total_programs
+        if (stats.get('calculation_rate', 0) >= 100 or
+                stats.get('loop_efficiency', 1) >= 0.6 or user_share < 0.15):
+            return 0
+
+        rate_pressure = max(0.0, (100 - stats.get('calculation_rate', 0)) / 100)
+        efficiency_pressure = max(0.0, (0.6 - stats.get('loop_efficiency', 0)) / 0.6)
+        degradation = min(1.0, min(rate_pressure, efficiency_pressure))
+        resistance = min(0.9, 0.25 + stats.get('user_resistance', 0))
+        suppression_chance = degradation * (1.0 - resistance)
+        candidates = sorted(
+            (
+                (cell.energy, x, y, cell)
+                for y, row in enumerate(self.grid.grid)
+                for x, cell in enumerate(row)
+                if cell.cell_type == CellType.USER_PROGRAM
+            ),
+            key=lambda candidate: candidate[0]
+        )
+        limit = min(3, max(1, math.ceil(user_count * 0.1)))
+        suppressed = 0
+        for _, x, y, cell in candidates:
+            if suppressed >= limit:
+                break
+            if random.random() >= suppression_chance:
+                continue
+
+            replacement = GridCell(CellType.MCP_PROGRAM, max(0.3, cell.energy))
+            replacement.metadata['is_calculator'] = True
+            replacement.metadata['calculation_power'] = replacement.energy
+            self.grid.grid[y][x] = replacement
+            suppressed += 1
+
+        self.grid.mcp_suppressed_user_programs += suppressed
+        return suppressed
 
     def receive_command(self, command):
         """Receive and process a command with learning integration"""
