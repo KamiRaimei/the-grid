@@ -795,7 +795,8 @@ class TRONGrid:
                                     new_grid[ny][nx] = GridCell(
                                         cell.cell_type,
                                         min(1.0, cell.energy + 0.05),  # Gain energy from optimization
-                                        cell.age + 1
+                                        cell.age + 1,
+                                        metadata=cell.metadata.copy()
                                     )
                                     # Create optimized trail
                                     new_grid[y][x] = GridCell(
@@ -809,7 +810,8 @@ class TRONGrid:
                     new_grid[y][x] = GridCell(
                         cell.cell_type,
                         max(0.3, cell.energy - 0.01),  # Less energy decay for MCP
-                        cell.age + 1
+                        cell.age + 1,
+                        metadata=cell.metadata.copy()
                     )
 
                 # SPECIAL PROGRAMS - Stay in place and boost optimization
@@ -1219,14 +1221,15 @@ class TRONGrid:
                             if self.grid[y][x].cell_type != CellType.EMPTY)
         resource_usage = active_cells / total_cells if total_cells > 0 else 0
 
-        # Calculate user resistance (chance user programs resist MCP control)
-        user_resistance = min(0.5, counts[CellType.USER_PROGRAM] / total_cells * 2 if total_cells > 0 else 0)
-
-        # Express control as MCP's share of the user/MCP program population.
+        # Express control and resistance as shares of the competing program population.
         total_control_programs = counts[CellType.MCP_PROGRAM] + counts[CellType.USER_PROGRAM]
         mcp_control = (
             counts[CellType.MCP_PROGRAM] / total_control_programs
             if total_control_programs else 0.5
+        )
+        user_resistance = (
+            counts[CellType.USER_PROGRAM] / total_control_programs
+            if total_control_programs else 0.0
         )
 
         # Get calculation stats
@@ -2053,6 +2056,7 @@ class EnhancedMCP:
 
         self.last_autonomous_action_time = time.time()  # Initialize timestamp
         self._last_autonomous_action_time = time.time()
+        self._last_user_suppression_generation = -10
         self.should_shutdown = False
         # Initialize advanced learning system
         self.learning_system = MCPLearningSystem(
@@ -2910,8 +2914,14 @@ class EnhancedMCP:
         if not possible_actions:
             return None
 
-        # Get action from learning system
-        action_type = self.learning_system.get_action(current_state, possible_actions)
+        # Make the response reliable, but limit repeated suppression while degradation persists.
+        if (
+            self._user_program_degradation() and
+            self.grid.generation - self._last_user_suppression_generation >= 10
+        ):
+            action_type = 'suppress_user_programs'
+        else:
+            action_type = self.learning_system.get_action(current_state, possible_actions)
 
         # Execute action
         action_result = self._execute_autonomous_action(action_type, current_state)
@@ -3274,6 +3284,7 @@ class EnhancedMCP:
             'enhance_collaboration', 'inefficiency_cleanup', 'cell_repurposing',
             'optimize_cell_efficiency', 'maintain_energy_grid',
             'optimize_resource_distribution', 'balance_system_load',
+            'suppress_user_programs',
         }
 
         # Get suggestions from learning system
@@ -3288,6 +3299,9 @@ class EnhancedMCP:
                 'deploy_fibonacci_processors',
                 'improve_cell_cooperation'
             ])
+
+        if self._user_program_degradation():
+            actions.append('suppress_user_programs')
 
         if state.get('grid_bugs', 0) > 5:
             actions.extend([
@@ -3341,6 +3355,13 @@ class EnhancedMCP:
                 self._optimize_calculation_loop()
                 result['success'] = True
                 result['message'] = "Optimizing calculation loop using learned strategies"
+
+            elif action_type == 'suppress_user_programs':
+                suppressed = self._suppress_user_programs()
+                result['success'] = suppressed > 0
+                result['message'] = f"Suppressed {suppressed} user program(s) during performance degradation"
+                if suppressed:
+                    self._last_user_suppression_generation = self.grid.generation
 
             elif action_type == 'deploy_fibonacci_processors':
                 # Deploy Fibonacci processors
@@ -3580,9 +3601,8 @@ class EnhancedMCP:
 
     def _optimize_calculation_loop(self):
         """Enhanced optimization with learning"""
+        state_before = self.grid.stats.copy()
         previous_efficiency = self.grid.stats['loop_efficiency']
-
-        suppressed = self._suppress_user_programs()
 
         # Add calculation infrastructure based on learned efficiency focus
         efficiency_focus = self.learning_system.personality_traits['efficiency_focus']
@@ -3606,7 +3626,7 @@ class EnhancedMCP:
 
         # Record optimization experience
         self.learning_system.record_experience(
-            state=self.grid.stats.copy(),  # Capture state before optimization
+            state=state_before,
             action="optimize_calculation_loop",
             reward=reward,
             next_state=self.grid.stats.copy(),  # State after optimization
@@ -3614,28 +3634,41 @@ class EnhancedMCP:
         )
 
         self.add_log(
-            f"MCP: Optimized loop using learned strategies. Suppressed {suppressed} "
-            f"user program(s); efficiency change: {efficiency_change:+.3f}"
+            f"MCP: Optimized loop using learned strategies. Added {infrastructure_added} "
+            f"infrastructure cell(s); efficiency change: {efficiency_change:+.3f}"
         )
 
-    def _suppress_user_programs(self):
-        """Suppress a limited number of user programs only during measurable degradation."""
+    def _user_program_degradation(self):
+        """Detect sustained calculation-rate decline alongside low efficiency and user pressure."""
         stats = self.grid.stats
         user_count = stats.get('user_programs', 0)
         total_programs = user_count + stats.get('mcp_programs', 0)
-        if user_count == 0 or total_programs == 0:
+        if user_count == 0 or total_programs == 0 or user_count / total_programs < 0.15:
+            return False
+        if stats.get('loop_efficiency', 1) >= 0.6:
+            return False
+
+        # Compare against prior generations so startup's zero rate is not treated as degradation.
+        history = list(self.grid.resource_history)[:-1][-20:]
+        rates = sorted(
+            entry['calculation_rate']
+            for entry in history
+            if entry.get('calculation_rate', 0) > 0
+        )
+        if len(rates) < 5:
+            return False
+
+        baseline_rate = rates[len(rates) // 2]
+        return baseline_rate > 0 and stats.get('calculation_rate', 0) < baseline_rate * 0.7
+
+    def _suppress_user_programs(self):
+        """Convert a bounded number of user programs when sustained degradation is detected."""
+        stats = self.grid.stats
+        user_count = stats.get('user_programs', 0)
+        total_programs = user_count + stats.get('mcp_programs', 0)
+        if not self._user_program_degradation():
             return 0
 
-        user_share = user_count / total_programs
-        if (stats.get('calculation_rate', 0) >= 100 or
-                stats.get('loop_efficiency', 1) >= 0.6 or user_share < 0.15):
-            return 0
-
-        rate_pressure = max(0.0, (100 - stats.get('calculation_rate', 0)) / 100)
-        efficiency_pressure = max(0.0, (0.6 - stats.get('loop_efficiency', 0)) / 0.6)
-        degradation = min(1.0, min(rate_pressure, efficiency_pressure))
-        resistance = min(0.9, 0.25 + stats.get('user_resistance', 0))
-        suppression_chance = degradation * (1.0 - resistance)
         candidates = sorted(
             (
                 (cell.energy, x, y, cell)
@@ -3646,18 +3679,12 @@ class EnhancedMCP:
             key=lambda candidate: candidate[0]
         )
         limit = min(3, max(1, math.ceil(user_count * 0.1)))
-        suppressed = 0
-        for _, x, y, cell in candidates:
-            if suppressed >= limit:
-                break
-            if random.random() >= suppression_chance:
-                continue
-
+        suppressed = min(limit, len(candidates))
+        for _, x, y, cell in candidates[:suppressed]:
             replacement = GridCell(CellType.MCP_PROGRAM, max(0.3, cell.energy))
             replacement.metadata['is_calculator'] = True
             replacement.metadata['calculation_power'] = replacement.energy
             self.grid.grid[y][x] = replacement
-            suppressed += 1
 
         self.grid.mcp_suppressed_user_programs += suppressed
         return suppressed
