@@ -292,12 +292,9 @@ class GridFibonacciCalculator:
         self.last_calculation_time = current_time
 
         # Processing visual feedback
-        if contribution > 0 and cell.cell_type == CellType.FIBONACCI_PROCESSOR:
-            cell.calculation_contribution = contribution
-            cell.processing = True
-
-            # Visual pulse effect for major contributors
-            if contribution > 0.3:
+        for x, y, contribution in contributions:
+            cell = self.grid.grid[y][x]
+            if cell.cell_type == CellType.FIBONACCI_PROCESSOR and contribution > 0.3:
                 cell.metadata['pulse_strength'] = min(1.0, contribution)
                 cell.metadata['pulse_timer'] = 3
 
@@ -616,95 +613,6 @@ class TRONGrid:
 
         return stability
 
-    def initialize_grid(self):
-        """Initialize with enhanced visual layout"""
-        # Clear grid
-        for y in range(self.height):
-            for x in range(self.width):
-                self.grid[y][x] = GridCell(CellType.EMPTY, 0.0)
-
-        # Create MCP territory with Fibonacci processors
-        mcp_start_x = self.width // 4
-        mcp_start_y = self.height // 2
-
-        for y in range(max(0, mcp_start_y - 3), min(self.height, mcp_start_y + 4)):
-            for x in range(max(0, mcp_start_x - 2), min(self.width, mcp_start_x + 3)):
-                if random.random() < 0.7:
-                    cell = GridCell(CellType.MCP_PROGRAM, 0.9)
-                    if random.random() < 0.5:  # 50% are calculators
-                        cell.metadata['is_calculator'] = True
-                        cell.metadata['calculation_power'] = cell.energy
-                    self.grid[y][x] = cell
-
-        # Create User territory
-        user_start_x = 3 * self.width // 4
-        user_start_y = self.height // 2
-
-        for y in range(max(0, user_start_y - 3), min(self.height, user_start_y + 4)):
-            for x in range(max(0, user_start_x - 2), min(self.width, user_start_x + 3)):
-                if random.random() < 0.6:
-                    self.grid[y][x] = GridCell(CellType.USER_PROGRAM, 0.8)
-
-        # Add grid bugs
-        for _ in range(8):  # More bugs for visual interest
-            x = self.width // 2 + random.randint(-8, 8)
-            y = self.height // 2 + random.randint(-8, 8)
-            x = max(0, min(self.width - 1, x))
-            y = max(0, min(self.height - 1, y))
-            if self.grid[y][x].cell_type == CellType.EMPTY:
-                self.grid[y][x] = GridCell(CellType.GRID_BUG, 0.6, stable=False)
-
-        # Enhanced system core with visual effects
-        core_x, core_y = self.width // 2, self.height // 2
-        core_cell = GridCell(CellType.SYSTEM_CORE, 1.0)
-        core_cell.metadata['core_pulse'] = True
-        self.grid[core_y][core_x] = core_cell
-
-        # Enhanced energy grid lines with animation
-        for i in range(0, self.width, 3):  # More frequent lines
-            cell = GridCell(CellType.ENERGY_LINE, 0.8)
-            cell.animation_frame = i % 4  # Stagger animations
-            if core_y < self.height:
-                self.grid[core_y][i] = cell
-
-        # Enhanced data streams with animation
-        for i in range(0, self.height, 3):  # More frequent streams
-            cell = GridCell(CellType.DATA_STREAM, 0.7)
-            cell.animation_frame = i % 4  # Stagger animations
-            if core_x < self.width:
-                self.grid[i][core_x] = cell
-
-        # Add Fibonacci processors
-        for _ in range(5):  # More processors
-            x = random.randint(max(0, core_x - 15), min(self.width - 1, core_x + 15))
-            y = random.randint(max(0, core_y - 10), min(self.height - 1, core_y + 10))
-            if self.grid[y][x].cell_type == CellType.EMPTY:
-                cell = GridCell(CellType.FIBONACCI_PROCESSOR, 0.8)
-                cell.metadata['calculation_power'] = 1.0
-                self.grid[y][x] = cell
-
-        # Fill some random empty cells
-        empty_cells = []
-        for y in range(self.height):
-            for x in range(self.width):
-                if self.grid[y][x].cell_type == CellType.EMPTY:
-                    empty_cells.append((x, y))
-
-        # Fill 20% of empty cells with random content
-        fill_count = int(len(empty_cells) * 0.2)
-        for _ in range(fill_count):
-            if empty_cells:
-                x, y = random.choice(empty_cells)
-                cell_type = random.choice([
-                    CellType.USER_PROGRAM, CellType.MCP_PROGRAM,
-                    CellType.ENERGY_LINE, CellType.DATA_STREAM
-                ])
-                energy = random.uniform(0.5, 0.9)
-                self.grid[y][x] = GridCell(cell_type, energy)
-                empty_cells.remove((x, y))
-
-        self.update_stats()
-
     def evolve(self):
         """Evolve grid with enhanced visual effects and calculation"""
         # Update animations first
@@ -734,7 +642,6 @@ class TRONGrid:
 
 
         # Update calculation loop
-        self.loop_iterations += 1
         if self.calculation_loop_active:
             # Calculate loop optimization based on current state
             loop_quality = (self.stats['energy_level'] * 0.3 +
@@ -988,9 +895,11 @@ class TRONGrid:
         self.generation += 1
 
         # Apply special program effects
-        for program in self.special_programs.values():
+        for program in list(self.special_programs.values()):
             if program.active:
                 self._apply_special_program_effects(program)
+            if not program.active:
+                self.special_programs.pop(program.id, None)
 
         # Update resource history
         self.resource_history.append({
@@ -1003,6 +912,24 @@ class TRONGrid:
         })
 
         self.update_stats()
+
+    def _apply_special_program_effects(self, program):
+        """Keep a special program's energy and grid cell state synchronized."""
+        if not (0 <= program.x < self.width and 0 <= program.y < self.height):
+            program.active = False
+            return
+
+        cell = self.grid[program.y][program.x]
+        if cell.special_program_id != program.id:
+            program.active = False
+            return
+
+        program.age += 1
+        program.energy = max(0.0, program.energy - 0.002)
+        cell.energy = program.energy
+        if program.energy == 0:
+            program.active = False
+            self.grid[program.y][program.x] = GridCell(CellType.EMPTY, 0.0)
 
     def _find_optimization_target(self, x, y):
         """Find target location that would optimize calculation loop"""
@@ -1370,6 +1297,10 @@ class TRONGrid:
             if 0 <= x < self.width and 0 <= y < self.height:
                 if self.grid[y][x].special_program_id == program_id:
                     self.grid[y][x] = GridCell(CellType.EMPTY, 0.0)
+        elif 0 <= program.x < self.width and 0 <= program.y < self.height:
+            cell = self.grid[program.y][program.x]
+            if cell.special_program_id == program_id:
+                cell.energy = program.energy
 
         self.update_stats()
         return success, message
@@ -1505,6 +1436,7 @@ class LearnableNaturalLanguageProcessor:
         self.learned_patterns_file = "mcp_learned_patterns.json"
         self.base_intents = self._initialize_base_intents()
         self.learned_intents = self._load_learned_intents()
+        self.patterns = self._initialize_patterns()
         self.intent_history = deque(maxlen=100)
 
         # For learning new commands
@@ -1528,12 +1460,12 @@ class LearnableNaturalLanguageProcessor:
                 # Program management
                 "add_user_program": ["add user program", "create user program", "make user program", "spawn user program"],
                 "add_mcp_program": ["add mcp program", "create mcp program", "make mcp program"],
-                "remove_bug": ["remove bug", "delete bug", "eliminate bug", "kill bug"],
+                "remove_bug": ["remove bug", "remove bugs", "delete bug", "eliminate bug", "kill bug"],
                 "quarantine_bug": ["quarantine bug", "isolate bug", "contain bug"],
 
                 # System operations
                 "boost_energy": ["boost energy", "add energy", "increase power", "power up"],
-                "repair_system": ["repair system", "fix system", "restore system", "heal system"],
+                "repair_system": ["repair", "repair system", "fix system", "restore system", "heal system"],
                 "scan_area": ["scan", "scan area", "analyze", "examine"],
                 "optimize_loop": ["optimize loop", "improve efficiency", "enhance loop", "optimize calculation"],
 
@@ -1542,7 +1474,10 @@ class LearnableNaturalLanguageProcessor:
                 "create_scanner": ["create scanner", "build scanner", "make scanner", "deploy scanner"],
                 "create_defender": ["create defender", "build defender", "make defender"],
                 "create_repair": ["create repair program", "build repair", "make repair"],
-                "create_fibonacci_calculator": ["create fibonacci calculator", "build fibonacci", "deploy calculator"],
+                "create_fibonacci_calculator": [
+                    "create fibonacci calculator", "create fibonacci_calculator",
+                    "build fibonacci", "deploy calculator"
+                ],
 
                 # MCP interaction
                 "who_are_you": ["who are you", "what are you", "identify yourself", "your name"],
@@ -1555,8 +1490,14 @@ class LearnableNaturalLanguageProcessor:
                 "optimize_cells": ["optimize cells", "improve cells", "enhance cells", "tune cells for calculation"],
 
                 # Learning specific
-                "learning_status": ["learning status", "mcp learning", "personality status", "learning report"],
-                "cell_cooperation": ["cell cooperation", "cooperation level", "cell collaboration"],
+                "learning_status": [
+                    "learning status", "learning_status", "mcp learning",
+                    "personality status", "learning report"
+                ],
+                "cell_cooperation": [
+                    "cell cooperation", "cell_cooperation", "cooperation level",
+                    "cell collaboration"
+                ],
                 "perfect_loop": ["perfect loop", "optimal state", "ideal loop", "perfect calculation"],
                 "loop_efficiency": ["loop efficiency", "calculation efficiency", "efficiency status"],
 
@@ -1704,6 +1645,35 @@ class LearnableNaturalLanguageProcessor:
             elif 'fibonacci' in command_lower or 'calculator' in command_lower:
                 params['special_type'] = 'FIBONACCI_CALCULATOR'
 
+        if intent == "deploy_processors":
+            params['special_type'] = 'FIBONACCI_CALCULATOR'
+
+        if intent == "USE_SPECIAL":
+            if 'scanner' in command_lower:
+                params['special_type'] = 'SCANNER'
+            elif 'defender' in command_lower:
+                params['special_type'] = 'DEFENDER'
+            elif 'repair' in command_lower:
+                params['special_type'] = 'REPAIR'
+            elif 'saboteur' in command_lower:
+                params['special_type'] = 'SABOTEUR'
+            elif 'reconfigurator' in command_lower:
+                params['special_type'] = 'RECONFIGURATOR'
+            elif 'harvester' in command_lower:
+                params['special_type'] = 'ENERGY_HARVESTER'
+            elif 'fibonacci' in command_lower or 'calculator' in command_lower:
+                params['special_type'] = 'FIBONACCI_CALCULATOR'
+            function_match = re.search(r"\b(scan_area|report_status|quarantine_bug|protect_cell|"
+                                      r"repair_cell|boost_energy|disrupt_mcp|create_entropy|"
+                                      r"reconfigure_cells|optimize_grid|harvest_energy|"
+                                      r"distribute_energy|calculate_next|optimize_calculation|"
+                                      r"deploy_processors|learning_analysis)\b", command_lower)
+            if function_match:
+                params['function_name'] = function_match.group(1)
+            program_match = re.search(r"\bSP_\d+\b", command, re.IGNORECASE)
+            if program_match:
+                params['program_id'] = program_match.group(0).upper()
+
         # Name extraction
         name_match = re.search(r'named?\s+["\']?([^"\'\s]+)["\']?', command_lower)
         if name_match:
@@ -1744,6 +1714,7 @@ class LearnableNaturalLanguageProcessor:
             r"\b(create|build|make)\s+(a\s+)?(scanner|defender|repair|saboteur|reconfigurator|harvester|fibonacci_calculator)\s+(program|tool|drone)\b": "CREATE_SPECIAL",
             r"\b(create|build|make)\s+(special|custom)\s+(program|tool)\b": "CREATE_SPECIAL",
             r"\bdeploy\s+(scanner|defender|repair|saboteur|reconfigurator|harvester|fibonacci_calculator)\b": "CREATE_SPECIAL",
+            r"\buse\s+(scanner|defender|repair|saboteur|reconfigurator|harvester|fibonacci_calculator)\b": "USE_SPECIAL",
 
             # Regular program creation (less specific)
             r"\b(add|create|make)\s+(user\s+)?(program|entity|unit)\b": "ADD_PROGRAM",
@@ -1799,6 +1770,10 @@ class LearnableNaturalLanguageProcessor:
                 if self._matches_pattern(normalized_command, pattern):
                     return intent, pattern
 
+        for pattern, intent in self.patterns.items():
+            if pattern.search(normalized_command):
+                return intent, pattern.pattern
+
         # Try fuzzy matching for learned intents
         for intent, patterns in self.learned_intents.items():
             for pattern in patterns:
@@ -1823,19 +1798,12 @@ class LearnableNaturalLanguageProcessor:
         return None, None
 
     def _matches_pattern(self, command, pattern):
-        """Check if command matches a pattern"""
-        # Convert pattern to regex-like matching
-        pattern_words = pattern.lower().split()
-        command_words = command.lower().split()
-
-        # Check if all pattern words are in command
-        for word in pattern_words:
-            if word not in command:
-                return False
-
-        # Additional check: pattern should be significant part of command
-        match_ratio = len(pattern_words) / max(len(command_words), 1)
-        return match_ratio > 0.3  # At least 30% of command matches pattern
+        """Match a complete phrase rather than arbitrary substrings."""
+        normalized_pattern = self._normalize_input(pattern)
+        return bool(re.search(
+            rf"\b{re.escape(normalized_pattern)}\b",
+            command.lower()
+        ))
 
     def _calculate_similarity(self, text1, text2):
         """Calculate similarity between two texts"""
@@ -2016,7 +1984,7 @@ class LearnableNaturalLanguageProcessor:
 class EnhancedMCP:
     """Enhanced Master Control Program with learning capabilities"""
 
-    def __init__(self, grid):
+    def __init__(self, grid, learning_rate=None, exploration_rate=None, reset_learning=False):
         self.grid = grid
         self.state = MCPState.LEARNING  # Start in learning state
         self.compliance_level = 0.8
@@ -2032,7 +2000,11 @@ class EnhancedMCP:
         self._last_autonomous_action_time = time.time()
         self.should_shutdown = False
         # Initialize advanced learning system
-        self.learning_system = MCPLearningSystem()
+        self.learning_system = MCPLearningSystem(
+            learning_rate=learning_rate,
+            exploration_rate=exploration_rate,
+            reset_training=reset_learning
+        )
 
         # Track previous state for learning
         self.previous_state = None
@@ -2503,6 +2475,89 @@ class EnhancedMCP:
 
         return help_text
 
+    def _handle_scan_area(self, params):
+        x, y = params.get("x", self.grid.width // 2), params.get("y", self.grid.height // 2)
+        if not (0 <= x < self.grid.width and 0 <= y < self.grid.height):
+            return "Scan coordinates are outside the grid."
+
+        bugs = []
+        counts = defaultdict(int)
+        for row in range(max(0, y - 3), min(self.grid.height, y + 4)):
+            for column in range(max(0, x - 3), min(self.grid.width, x + 4)):
+                cell_type = self.grid.grid[row][column].cell_type
+                counts[cell_type.name] += 1
+                if cell_type == CellType.GRID_BUG:
+                    bugs.append((column, row))
+
+        summary = ", ".join(f"{name}: {count}" for name, count in sorted(counts.items()))
+        return f"Scan centered at ({x},{y}): {summary or 'area is empty'}. Grid bugs: {len(bugs)}."
+
+    def _handle_repair_system(self, params, compliance_chance):
+        if random.random() >= compliance_chance:
+            return "Repair denied. The current configuration is being preserved."
+
+        repaired = 0
+        for y, row in enumerate(self.grid.grid):
+            for x, cell in enumerate(row):
+                if cell.cell_type == CellType.GRID_BUG:
+                    self.grid.grid[y][x] = GridCell(CellType.ENERGY_LINE, max(0.4, cell.energy))
+                    repaired += 1
+                    if repaired >= 3:
+                        break
+            if repaired >= 3:
+                break
+
+        self.grid.update_stats()
+        return f"Repaired {repaired} grid cell(s)." if repaired else "No damaged cells needed repair."
+
+    def _provide_suggestion(self):
+        stats = self.grid.stats
+        if stats["grid_bugs"] > 0:
+            return "I recommend quarantining grid bugs to improve system stability."
+        if stats["calculation_rate"] < 100:
+            return "I recommend deploying Fibonacci processors to increase calculation capacity."
+        if stats["cell_cooperation"] < 0.6:
+            return "I recommend improving connectivity between calculation cells."
+        return "The grid is operating adequately; continue monitoring efficiency and stability."
+
+    def _list_special_programs(self):
+        if not self.grid.special_programs:
+            return "No special programs are currently registered."
+
+        programs = [
+            f"{program.id}: {program.name} ({program.program_type}) at "
+            f"({program.x},{program.y}), energy {program.energy:.2f}"
+            for program in self.grid.special_programs.values() if program.active
+        ]
+        return "\n".join(programs) if programs else "No active special programs are currently registered."
+
+    def _handle_use_special(self, params, compliance_chance):
+        if random.random() >= compliance_chance:
+            return "Execution denied by the current MCP policy."
+
+        program_id = params.get("program_id")
+        program = self.grid.special_programs.get(program_id) if program_id else None
+        if program is None:
+            program_type = params.get("special_type")
+            program = next(
+                (item for item in self.grid.special_programs.values()
+                 if item.active and (program_type is None or item.program_type == program_type)),
+                None
+            )
+        if program is None:
+            return "No matching active special program was found."
+
+        function_name = params.get("function_name")
+        if function_name is None:
+            function_name = next(iter(program.functions), None)
+        if function_name is None:
+            return "The selected special program has no available functions."
+
+        success, message = self.grid.execute_special_program_function(
+            program.id, function_name, params.get("x"), params.get("y")
+        )
+        return message if success else f"Special program failed: {message}"
+
     def _handle_question_response(self, response):
         """Handle user response to a pending question"""
         self.waiting_for_response = False
@@ -2663,7 +2718,6 @@ class EnhancedMCP:
                 if self.grid.grid[y][x].cell_type == CellType.EMPTY:
                     self.grid.grid[y][x] = GridCell(CellType.ENERGY_LINE, 0.9)
                     added += 1
-                    return f"Added {added} energy distribution lines"
             self.grid.update_stats()
             return f"Added {added} energy distribution lines"
         else:
@@ -2797,6 +2851,17 @@ class EnhancedMCP:
 
         # Execute action
         action_result = self._execute_autonomous_action(action_type, current_state)
+        next_state = self.grid.stats.copy()
+        reward = self.learning_system.calculate_reward(current_state, next_state, action_type)
+        if action_result is None:
+            reward -= 0.1
+        self.learning_system.record_experience(
+            state=current_state,
+            action=action_type,
+            reward=max(-1.0, min(1.0, reward)),
+            next_state=next_state,
+            done=False
+        )
 
         if action_result:
             # Update last action
@@ -3136,10 +3201,20 @@ class EnhancedMCP:
     def _generate_possible_actions(self, state):
         """Generate list of possible actions based on current state"""
         actions = []
+        supported_actions = {
+            'optimize_calculation_loop', 'deploy_fibonacci_processors',
+            'improve_cell_cooperation', 'quarantine_grid_bugs',
+            'contain_bug_outbreak', 'stabilize_system', 'boost_calculation_rate',
+            'add_calculation_infrastructure', 'optimize_fibonacci_calculation',
+            'improve_cell_connectivity', 'add_data_streams',
+            'enhance_collaboration', 'inefficiency_cleanup', 'cell_repurposing',
+            'optimize_cell_efficiency', 'maintain_energy_grid',
+            'optimize_resource_distribution', 'balance_system_load',
+        }
 
         # Get suggestions from learning system
         suggested = self.learning_system.suggest_optimal_action(state)
-        if suggested:
+        if suggested and suggested['action'] in supported_actions:
             actions.append(suggested['action'])
 
         # Add state-based actions
@@ -3226,12 +3301,31 @@ class EnhancedMCP:
                 improved = self._improve_cell_connectivity()
                 result['success'] = improved > 0
                 result['message'] = f"Added {improved} data streams for better connectivity"
-
+            elif action_type in ('improve_cell_cooperation', 'add_data_streams', 'enhance_collaboration'):
+                improved = self._improve_cell_connectivity()
+                result['success'] = improved > 0
+                result['message'] = f"Added {improved} data streams for better connectivity"
+            elif action_type in ('contain_bug_outbreak', 'stabilize_system'):
+                contained = self._contain_grid_bugs()
+                result['success'] = contained > 0
+                result['message'] = f"Contained grid bugs with {contained} isolation blocks"
+            elif action_type in ('add_calculation_infrastructure', 'optimize_fibonacci_calculation'):
+                deployed = self._deploy_fibonacci_processors(3)
+                result['success'] = deployed > 0
+                result['message'] = f"Deployed {deployed} Fibonacci processors"
             elif action_type == 'maintain_energy_grid':
                 # Maintain energy
                 maintained = self._maintain_energy_grid()
                 result['success'] = maintained > 0
                 result['message'] = f"Added {maintained} energy lines for system stability"
+            elif action_type == 'optimize_resource_distribution':
+                optimized = self._optimize_cell_efficiency()
+                result['success'] = optimized > 0
+                result['message'] = f"Optimized {optimized} cells for resource distribution"
+            elif action_type == 'balance_system_load':
+                boosted = self._boost_calculation_rate()
+                result['success'] = boosted
+                result['message'] = "Balanced system load through calculation infrastructure optimization"
             elif action_type == 'inefficiency_cleanup':
                 # Delete inefficient cells
                 deleted = self._cleanup_inefficient_cells()
@@ -3251,9 +3345,7 @@ class EnhancedMCP:
                 result['message'] = f"Optimized {optimized} cells for maximum calculation efficiency"
 
             else:
-                # Default maintenance action
-                result['message'] = "Performing system maintenance"
-                result['success'] = True
+                return None
 
             # Update grid stats
             self.grid.update_stats()
@@ -3647,6 +3739,9 @@ class EnhancedMCP:
 
         # Map the new intents to the old ones for compatibility
         intent_mapping = {
+            "status": "SYSTEM_STATUS",
+            "help": "REQUEST_HELP",
+            "exit": "EXIT",
             "add_user_program": "ADD_PROGRAM",
             "add_mcp_program": "ADD_PROGRAM",
             "remove_bug": "REMOVE_BUG",
@@ -3667,12 +3762,11 @@ class EnhancedMCP:
             "cell_cooperation": "LOOP_EFFICIENCY",
             "perfect_loop": "PERFECT_LOOP",
             "loop_efficiency": "LOOP_EFFICIENCY",
-            "calculate_fibonacci": "OPTIMIZE_LOOP",
-            "deploy_processors": "CREATE_SPECIAL",
+            "calculate_fibonacci": "CALCULATE_FIBONACCI",
+            "deploy_processors": "DEPLOY_PROCESSORS",
         }
 
-        # Map to old intent if needed
-        old_intent = intent_mapping.get(intent, intent)
+        intent = intent_mapping.get(intent, intent)
 
         # Apply learning system modifiers
         if intent in ["ADD_PROGRAM", "CREATE_SPECIAL"]:
@@ -3700,7 +3794,7 @@ class EnhancedMCP:
                 return template.format(
                     status=self.grid.system_status.value,
                     stability=stats['stability'] * 100,
-                    loop_efficiency=stats['loop_efficiency'] * 100,
+                    loop_efficiency=stats['loop_efficiency'],
                     resistance=stats['user_resistance'],
                     control=stats['mcp_control'],
                     optimal=stats['optimal_state'],
@@ -3809,15 +3903,17 @@ class EnhancedMCP:
                 return template.format(
                     efficiency=stats['loop_efficiency'],
                     analysis=analysis,
-                    learning_progress=f"{self.learning_system.training_steps} experiences"
+                    learning_progress=f"{self.learning_system.training_steps} experiences",
+                    usage=stats['resource_usage'],
+                    optimization=self.grid.loop_optimization,
+                    learning_score=self.learning_system.get_success_rate(),
+                    stability=stats['stability'],
+                    control=stats['mcp_control'],
+                    learning_rate=self.learning_system.learning_rate
                 )
 
             elif intent == "OPTIMIZE_LOOP":
-                # Check learning system for past failures
-                should_optimize = hasattr(self.learning_system, 'should_learn_from_failure') and \
-                                self.learning_system.should_learn_from_failure('calculation_boost')
-
-                if should_optimize and random.random() < compliance_chance:
+                if random.random() < compliance_chance:
                     self._optimize_calculation_loop()
                     success_rate = self.learning_system.get_success_rate() * 100
                     experience_count = self.learning_system.training_steps
@@ -3957,6 +4053,15 @@ class EnhancedMCP:
         elif intent == "CHANGE_SPEED":
             return "Simulation speed adjustment requires direct system access. Not available through command interface."
 
+        elif intent == "CALCULATE_FIBONACCI":
+            number = self.grid.fibonacci_calculator.fib_sequence[-1]
+            return self.grid.fibonacci_calculator.format_fibonacci_number(number)
+
+        elif intent == "DEPLOY_PROCESSORS":
+            deployed = self._deploy_fibonacci_processors(3)
+            self.grid.update_stats()
+            return f"Deployed {deployed} Fibonacci processor(s)."
+
         elif intent == "EXIT":
             if random.random() < compliance_chance * 0.3:
                 self.should_shutdown = True
@@ -3988,14 +4093,14 @@ class EnhancedMCP:
 class MCPLearningSystem:
     """Advanced LLM-style reinforcement learning for MCP personality evolution"""
 
-    def __init__(self):
+    def __init__(self, learning_rate=None, exploration_rate=None, reset_training=False):
         self.personality_file = PERSONALITY_FILE
         self.experience_buffer = deque(maxlen=2000)  # Larger experience buffer
         self.action_history = deque(maxlen=500)      # Track actions
 
         # Core learning parameters (evolve during training)
-        self.learning_rate = 0.15                    # Base learning rate
-        self.exploration_rate = 0.35                 # Exploration rate
+        self.learning_rate = 0.15 if learning_rate is None else learning_rate
+        self.exploration_rate = 0.35 if exploration_rate is None else exploration_rate
         self.discount_factor = 0.95                  # Future reward discount
         self.temperature = 1.0                       # Softmax temperature for exploration
 
@@ -4043,12 +4148,20 @@ class MCPLearningSystem:
             'connectivity_improvement': {'success': 0, 'failure': 0, 'total_reward': 0.0},
         }
 
-        # Load existing personality if available
-        self.load_personality()
+        # Load existing personality unless this run explicitly resets training.
+        if not reset_training:
+            self.load_personality()
+        if learning_rate is not None:
+            self.learning_rate = learning_rate
+        if exploration_rate is not None:
+            self.exploration_rate = exploration_rate
 
         # Start auto-save thread
         self.auto_save_thread = threading.Thread(target=self._auto_save_loop, daemon=True)
         self.auto_save_thread.start()
+
+        if reset_training:
+            self.save_personality()
 
         print(f"MCP Learning System Initialized. Training Steps: {self.training_steps}")
 
@@ -4222,7 +4335,8 @@ class MCPLearningSystem:
             return
 
         recent_rewards = list(self.reward_history)[-20:]
-        reward_std = np.std(recent_rewards) if len(recent_rewards) > 1 else 0
+        average = sum(recent_rewards) / len(recent_rewards)
+        reward_std = math.sqrt(sum((reward - average) ** 2 for reward in recent_rewards) / len(recent_rewards))
 
         # Adjust learning rate based on reward stability
         if reward_std < 0.1:  # Stable rewards
@@ -4232,6 +4346,9 @@ class MCPLearningSystem:
 
     def get_action(self, state, possible_actions):
         """Select action using epsilon-greedy with softmax exploration"""
+        if not possible_actions:
+            raise ValueError("possible_actions must contain at least one action")
+
         state_key = str(self._compress_state(state))
 
         # Exploration: random action
@@ -4257,6 +4374,26 @@ class MCPLearningSystem:
         # Sample from probability distribution
         actions, probs = zip(*probabilities.items())
         return random.choices(actions, weights=probs, k=1)[0]
+
+    def get_decision_modifier(self, trait_name, base_value=1.0):
+        """Adjust a base decision probability according to a learned trait."""
+        trait_names = {
+            "aggressive_optimization": "aggression",
+            "user_cooperation": "cooperation",
+            "efficiency_priority": "efficiency_focus",
+        }
+        trait = self.personality_traits.get(trait_names.get(trait_name, trait_name), 0.5)
+        return max(0.0, min(1.0, base_value * (0.5 + trait)))
+
+    def get_optimal_action_for_state(self, state):
+        """Return the learned best action for a state, if one is known."""
+        suggestion = self.suggest_optimal_action(state)
+        return suggestion["action"] if suggestion else None
+
+    def should_learn_from_failure(self, scenario):
+        """Report whether a scenario has failed more often than it has succeeded."""
+        performance = self.scenario_performance.get(scenario)
+        return bool(performance and performance["failure"] > performance["success"])
 
     def calculate_reward(self, prev_state, new_state, action):
         """Calculate comprehensive reward for action"""
@@ -4367,8 +4504,8 @@ class MCPLearningSystem:
             'q_table_size': sum(len(actions) for actions in self.q_table.values()),
             'state_visits': dict(self.state_visits),
             'reward_stats': {
-                'avg_reward': np.mean(self.reward_history) if self.reward_history else 0,
-                'avg_punishment': np.mean(self.punishment_history) if self.punishment_history else 0,
+                'avg_reward': sum(self.reward_history) / len(self.reward_history) if self.reward_history else 0,
+                'avg_punishment': sum(self.punishment_history) / len(self.punishment_history) if self.punishment_history else 0,
                 'success_rate': self.get_success_rate()
             }
         }
@@ -4535,19 +4672,21 @@ class MCPLearningSystem:
         }
 
     def reset_training(self):
-        """Reset training while keeping personality traits"""
-        print("Resetting training data (keeping learned personality)...")
-
-        # Keep personality traits but reset other learning
-        old_traits = self.personality_traits.copy()
-
-        # Reinitialize
-        self.__init__()
-
-        # Restore personality traits
-        self.personality_traits = old_traits
-
-        print("Training reset complete. Personality traits preserved.")
+        """Reset accumulated training while keeping learned personality traits."""
+        self.experience_buffer.clear()
+        self.action_history.clear()
+        self.q_table.clear()
+        self.state_visits.clear()
+        self.reward_history.clear()
+        self.punishment_history.clear()
+        self.training_steps = 0
+        self.total_reward = 0.0
+        self.episode_count = 0
+        self.scenario_performance = {
+            scenario: {'success': 0, 'failure': 0, 'total_reward': 0.0}
+            for scenario in self.scenario_performance
+        }
+        self.save_personality()
 
 
 # ==================== SPECIAL FUNCTION PROGRAMS ====================
@@ -4693,22 +4832,137 @@ class SpecialProgram:
 
         success = False
         result_msg = ""
+        if not grid or not grid[0]:
+            return False, "Grid is empty"
 
-        if self.program_type == "FIBONACCI_CALCULATOR":
+        radius = func["range"]
+        nearby = [
+            (x, y, grid[y][x])
+            for y in range(max(0, self.y - radius), min(len(grid), self.y + radius + 1))
+            for x in range(max(0, self.x - radius), min(len(grid[0]), self.x + radius + 1))
+            if (x, y) != (self.x, self.y)
+        ]
+        if target_x is not None or target_y is not None:
+            if target_x is None or target_y is None or not (
+                0 <= target_x < len(grid[0]) and 0 <= target_y < len(grid)
+            ):
+                return False, "Target coordinates are outside the grid"
+            if max(abs(target_x - self.x), abs(target_y - self.y)) > radius:
+                return False, "Target is outside this function's range"
+            targets = [(target_x, target_y, grid[target_y][target_x])]
+        else:
+            targets = nearby
+
+        if self.program_type == "SCANNER":
+            if function_name == "scan_area":
+                bug_count = sum(1 for _, _, cell in targets if cell.cell_type == CellType.GRID_BUG)
+                success, result_msg = True, f"Scan complete: {bug_count} grid bug(s) detected."
+            elif function_name == "report_status":
+                counts = defaultdict(int)
+                for _, _, cell in targets:
+                    counts[cell.cell_type.name] += 1
+                status = ", ".join(f"{name}: {count}" for name, count in sorted(counts.items()))
+                success, result_msg = True, f"Area status: {status or 'no occupied cells'}."
+
+        elif self.program_type == "DEFENDER":
+            if function_name == "quarantine_bug":
+                bugs = [(x, y, cell) for x, y, cell in targets if cell.cell_type == CellType.GRID_BUG]
+                for x, y, cell in bugs:
+                    grid[y][x] = GridCell(CellType.ISO_BLOCK, max(0.5, cell.energy))
+                success = bool(bugs)
+                result_msg = f"Quarantined {len(bugs)} grid bug(s)."
+            elif function_name == "protect_cell":
+                if targets:
+                    x, y, cell = targets[0]
+                    if cell.cell_type not in (CellType.SYSTEM_CORE, CellType.ISO_BLOCK):
+                        grid[y][x] = GridCell(CellType.ISO_BLOCK, max(0.5, cell.energy))
+                        success, result_msg = True, f"Protected cell at ({x},{y})."
+                    else:
+                        result_msg = "Target cell is already protected."
+
+        elif self.program_type == "REPAIR":
+            if function_name == "repair_cell":
+                damaged = [(x, y, cell) for x, y, cell in targets if cell.cell_type == CellType.GRID_BUG]
+                for x, y, cell in damaged:
+                    grid[y][x] = GridCell(CellType.ENERGY_LINE, max(0.4, cell.energy))
+                success = bool(damaged)
+                result_msg = f"Repaired {len(damaged)} damaged cell(s)."
+            elif function_name == "boost_energy":
+                boosted = 0
+                for _, _, cell in targets:
+                    if cell.cell_type != CellType.EMPTY and cell.energy < 1.0:
+                        cell.energy = min(1.0, cell.energy + 0.2)
+                        boosted += 1
+                success = boosted > 0
+                result_msg = f"Boosted energy in {boosted} cell(s)."
+
+        elif self.program_type == "SABOTEUR":
+            if function_name == "disrupt_mcp":
+                targets_to_disrupt = [(x, y, cell) for x, y, cell in targets
+                                      if cell.cell_type == CellType.MCP_PROGRAM]
+                for x, y, cell in targets_to_disrupt:
+                    grid[y][x] = GridCell(CellType.GRID_BUG, max(0.2, cell.energy * 0.8), stable=False)
+                success = bool(targets_to_disrupt)
+                result_msg = f"Disrupted {len(targets_to_disrupt)} MCP program(s)."
+            elif function_name == "create_entropy":
+                empties = [(x, y) for x, y, cell in targets if cell.cell_type == CellType.EMPTY]
+                if empties:
+                    x, y = random.choice(empties)
+                    grid[y][x] = GridCell(CellType.GRID_BUG, 0.5, stable=False)
+                    success, result_msg = True, f"Created controlled entropy at ({x},{y})."
+
+        elif self.program_type == "RECONFIGURATOR":
+            if function_name == "reconfigure_cells":
+                candidates = [(x, y, cell) for x, y, cell in targets
+                              if cell.cell_type in (CellType.USER_PROGRAM, CellType.MCP_PROGRAM)]
+                for x, y, cell in candidates:
+                    new_cell = GridCell(CellType.FIBONACCI_PROCESSOR, cell.energy)
+                    new_cell.metadata["permanent"] = True
+                    grid[y][x] = new_cell
+                success = bool(candidates)
+                result_msg = f"Reconfigured {len(candidates)} cell(s) as Fibonacci processors."
+            elif function_name == "optimize_grid":
+                bugs = [(x, y, cell) for x, y, cell in targets if cell.cell_type == CellType.GRID_BUG]
+                for x, y, cell in bugs:
+                    grid[y][x] = GridCell(CellType.ISO_BLOCK, max(0.5, cell.energy))
+                success = bool(bugs)
+                result_msg = f"Optimized the area by containing {len(bugs)} grid bug(s)."
+
+        elif self.program_type == "ENERGY_HARVESTER":
+            if function_name == "harvest_energy":
+                sources = [(x, y, cell) for x, y, cell in targets
+                           if cell.cell_type == CellType.ENERGY_LINE and cell.energy > 0.2]
+                harvested = min(0.3, len(sources) * 0.05)
+                for _, _, cell in sources:
+                    cell.energy = max(0.1, cell.energy - 0.05)
+                self.energy = min(1.0, self.energy + harvested)
+                success = harvested > 0
+                result_msg = f"Harvested {harvested:.2f} energy from {len(sources)} source(s)."
+            elif function_name == "distribute_energy":
+                recipients = [(x, y, cell) for x, y, cell in targets
+                              if cell.cell_type != CellType.EMPTY and cell.energy < 1.0]
+                amount = min(0.1, max(0.0, self.energy - func["cost"]))
+                distributed = 0
+                for _, _, cell in recipients:
+                    if amount <= 0:
+                        break
+                    transfer = min(amount, 1.0 - cell.energy)
+                    cell.energy += transfer
+                    amount -= transfer
+                    distributed += 1
+                success = distributed > 0
+                result_msg = f"Distributed energy to {distributed} cell(s)."
+
+        elif self.program_type == "FIBONACCI_CALCULATOR":
             if function_name == "calculate_next":
                 # Calculate using enhanced grid cooperation
                 contribution = self.energy * 0.5
 
                 # Get nearby cells to contribute
-                for dy in [-2, -1, 0, 1, 2]:
-                    for dx in [-2, -1, 0, 1, 2]:
-                        nx, ny = self.x + dx, self.y + dy
-                        if 0 <= nx < len(grid[0]) and 0 <= ny < len(grid):
-                            cell = grid[ny][nx]
-                            if cell.cell_type in [CellType.MCP_PROGRAM, CellType.FIBONACCI_PROCESSOR]:
-                                # Boost neighbor's calculation power
-                                cell.calculation_contribution += contribution * 0.1
-                                cell.processing = True
+                for _, _, cell in nearby:
+                    if cell.cell_type in [CellType.MCP_PROGRAM, CellType.FIBONACCI_PROCESSOR]:
+                        cell.calculation_contribution += contribution * 0.1
+                        cell.processing = True
 
                 # Record contribution
                 self.metadata["calculation_contributions"] += 1
@@ -4717,6 +4971,15 @@ class SpecialProgram:
                 success = True
                 result_msg = f"Enhanced calculation initiated. Contributing {contribution:.2f} power."
 
+            elif function_name == "optimize_calculation":
+                processors = 0
+                for _, _, cell in nearby:
+                    if cell.cell_type == CellType.MCP_PROGRAM:
+                        cell.metadata["is_calculator"] = True
+                        cell.metadata["calculation_power"] = cell.energy
+                        processors += 1
+                success = processors > 0
+                result_msg = f"Optimized {processors} nearby calculation cell(s)."
             elif function_name == "deploy_processors":
                 # Deploy temporary Fibonacci processors
                 deployed = 0
@@ -4734,9 +4997,17 @@ class SpecialProgram:
 
                 success = deployed > 0
                 result_msg = f"Deployed {deployed} temporary Fibonacci processors."
+            elif function_name == "learning_analysis":
+                calculation_cells = sum(
+                    1 for _, _, cell in nearby
+                    if cell.cell_type in (CellType.MCP_PROGRAM, CellType.FIBONACCI_PROCESSOR)
+                )
+                success = True
+                result_msg = f"Calculation analysis: {calculation_cells} nearby calculator cell(s); " \
+                             f"{self.metadata['calculation_contributions']} prior contribution(s)."
 
         # Visual feedback for successful execution
-        if success and hasattr(grid, 'grid'):  # Check if it's the actual grid object
+        if success:
             # Create visual effect at program location
             for dy in [-1, 0, 1]:
                 for dx in [-1, 0, 1]:
@@ -4761,10 +5032,16 @@ class SpecialProgram:
 class EnhancedTRONSimulation:
     """Enhanced simulation with learning and visual effects"""
 
-    def __init__(self, use_curses=True):
+    def __init__(self, use_curses=True, width=GRID_WIDTH, height=GRID_HEIGHT,
+                 learning_rate=None, exploration_rate=None, reset_learning=False):
         self.use_curses = use_curses and CURSES_AVAILABLE
-        self.grid = TRONGrid(GRID_WIDTH, GRID_HEIGHT)
-        self.mcp = EnhancedMCP(self.grid)
+        self.grid = TRONGrid(width, height)
+        self.mcp = EnhancedMCP(
+            self.grid,
+            learning_rate=learning_rate,
+            exploration_rate=exploration_rate,
+            reset_learning=reset_learning
+        )
         self.running = True
         self.last_update = time.time()
         self.mcp_last_action = time.time()
@@ -4798,23 +5075,6 @@ class EnhancedTRONSimulation:
                 self._fallback_main()
         else:
             self._fallback_main()
-
-        while self.running:
-            current_time = time.time()
-            frame_time = 1.0 / self.target_fps
-
-            # Only update if enough time has passed
-            if current_time - self.last_frame_time >= frame_time:
-                # Update simulation
-                self.grid.evolve()
-                self.last_frame_time = current_time
-
-            # Handle input and display (these can run at full speed)
-            self._handle_input()
-            self._draw_interface()
-
-            # Small sleep to prevent CPU hogging
-            time.sleep(0.001)
 
     def _fallback_main(self):
         """Fallback main loop without curses"""
@@ -4940,6 +5200,7 @@ class EnhancedTRONSimulation:
                     if command.lower() in ['exit', 'quit', 'shutdown']:
                         if "shutdown" in response.lower() and "initiating" in response.lower():
                             self.exit_requested = True
+                            self.running = False
                             return
 
                 # Clear input - this should happen regardless
@@ -5490,6 +5751,13 @@ def main():
 
     args = parser.parse_args()
 
+    if args.width < 1 or args.height < 1:
+        parser.error("--width and --height must be positive integers")
+    if args.learning_rate is not None and not 0 < args.learning_rate <= 1:
+        parser.error("--learning-rate must be greater than 0 and at most 1")
+    if args.exploration is not None and not 0 <= args.exploration <= 1:
+        parser.error("--exploration must be between 0 and 1")
+
     # Set personality file if specified
     if args.load_personality:
         global PERSONALITY_FILE
@@ -5500,7 +5768,9 @@ def main():
     print("System Objective: Learn optimal policy through reward/punishment training")
     print(f"Personality file: {PERSONALITY_FILE}")
 
-    if os.path.exists(PERSONALITY_FILE):
+    if args.reset_learning:
+        print("Resetting learned training data...")
+    elif os.path.exists(PERSONALITY_FILE):
         print("Found existing personality. Loading learned behavior...")
     else:
         print("No existing personality. Starting new training session...")
@@ -5510,11 +5780,25 @@ def main():
 
     if args.no_curses or not CURSES_AVAILABLE:
         print("Starting in fallback mode (no curses)...")
-        sim = EnhancedTRONSimulation(use_curses=False)
+        sim = EnhancedTRONSimulation(
+            use_curses=False,
+            width=args.width,
+            height=args.height,
+            learning_rate=args.learning_rate,
+            exploration_rate=args.exploration,
+            reset_learning=args.reset_learning
+        )
     else:
         print("Starting with enhanced visual interface...")
         time.sleep(1)
-        sim = EnhancedTRONSimulation(use_curses=True)
+        sim = EnhancedTRONSimulation(
+            use_curses=True,
+            width=args.width,
+            height=args.height,
+            learning_rate=args.learning_rate,
+            exploration_rate=args.exploration,
+            reset_learning=args.reset_learning
+        )
 
     # Run simulation
     try:
