@@ -18,6 +18,7 @@ from .cells import (
     NUMPY_AVAILABLE,
 )
 from .fibonacci import GridFibonacciCalculator
+from .personality import UserProgramPersonality
 
 if NUMPY_AVAILABLE:
     import numpy as np
@@ -232,7 +233,10 @@ class TRONGrid:
             for x in range(self.width):
                 cell = self.grid[y][x]
                 if cell.cell_type == CellType.USER_PROGRAM:
-                    if random.random() < revolt_chance:
+                    personality = cell.personality or UserProgramPersonality()
+                    # Revolt chance modulated by personality rebellion + MCP pressure
+                    personal_revolt = personality.rebellion * 0.3
+                    if random.random() < revolt_chance + personal_revolt:
                         mcp_neighbors = [
                             (x + dx, y + dy)
                             for dx, dy in self.neighbor_offsets_8
@@ -244,16 +248,20 @@ class TRONGrid:
                             # MCP programs resist revolt based on system stability and disharmony
                             mcp_cell = self.grid[ty][tx]
                             revolt_resistance = 0.4 + self.stats['stability'] * 0.3 - self.disharmony * 0.2
+                            # Loyal user programs resist revolting less; rebellious ones more
+                            revolt_resistance -= personality.loyalty * 0.2
                             if random.random() < revolt_resistance:
                                 # MCP resisted the revolt - user program stays in place
                                 new_grid[y][x] = GridCell(
                                     CellType.USER_PROGRAM,
                                     max(0.2, cell.energy - 0.1),
-                                    cell.age + 1
+                                    cell.age + 1,
+                                    personality=personality,
                                 )
                                 continue
                             new_grid[ty][tx] = GridCell(
-                                CellType.USER_PROGRAM, min(0.8, cell.energy * 0.8)
+                                CellType.USER_PROGRAM, min(0.8, cell.energy * 0.8),
+                                personality=personality.mutate(),
                             )
                             reserved_user_cells.add((tx, ty))
                             self.user_program_revolts += 1
@@ -273,7 +281,8 @@ class TRONGrid:
                         if empty_neighbors:
                             tx, ty = random.choice(empty_neighbors)
                             new_grid[ty][tx] = GridCell(
-                                CellType.USER_PROGRAM, min(0.8, cell.energy * 0.8)
+                                CellType.USER_PROGRAM, min(0.8, cell.energy * 0.8),
+                                personality=personality.mutate(),
                             )
                             reserved_user_cells.add((tx, ty))
                             self.user_program_multiplications += 1
@@ -297,9 +306,10 @@ class TRONGrid:
 
                 # USER PROGRAMS - May resist optimal configuration
                 if cell.cell_type == CellType.USER_PROGRAM:
-                    # User programs sometimes work against optimal loop
-                    if random.random() < self.stats['user_resistance'] * 0.3:
-                        # Move randomly instead of optimally
+                    personality = cell.personality or UserProgramPersonality()
+                    # Curious user programs move more; resistant ones move randomly
+                    if random.random() < self.stats['user_resistance'] * 0.3 * (1.0 - personality.cooperation):
+                        # Move randomly instead of optimally (resistant behavior)
                         dx, dy = random.choice([(-1,0), (1,0), (0,-1), (0,1)])
                         nx, ny = x + dx, y + dy
                         if 0 <= nx < self.width and 0 <= ny < self.height:
@@ -309,12 +319,14 @@ class TRONGrid:
                                 new_grid[ny][nx] = GridCell(
                                     cell.cell_type,
                                     cell.energy * 0.95,
-                                    cell.age + 1
+                                    cell.age + 1,
+                                    personality=personality,
                                 )
                                 continue
 
-                    # Normal movement towards efficiency (when not resisting)
-                    if random.random() < 0.3:
+                    # Normal movement towards efficiency (curious programs explore more)
+                    move_chance = 0.3 + 0.2 * personality.curiosity
+                    if random.random() < move_chance:
                         # Move towards area with good energy
                         dx = 0
                         dy = 0
@@ -331,7 +343,8 @@ class TRONGrid:
                                 new_grid[ny][nx] = GridCell(
                                     cell.cell_type,
                                     cell.energy * 0.95,
-                                    cell.age + 1
+                                    cell.age + 1,
+                                    personality=personality,
                                 )
                                 # Leave energy trail
                                 new_grid[y][x] = GridCell(
@@ -345,7 +358,8 @@ class TRONGrid:
                     new_grid[y][x] = GridCell(
                         cell.cell_type,
                         max(0.2, cell.energy - 0.03),
-                        cell.age + 1
+                        cell.age + 1,
+                        personality=personality,
                     )
 
                 # MCP PROGRAMS - Work towards perfect loop, actively claim territory
@@ -361,6 +375,18 @@ class TRONGrid:
                                 target = self.grid[ny][nx]
                                 if target.cell_type == CellType.USER_PROGRAM:
                                     # Convert user program to MCP program (claim territory)
+                                    target_personality = target.personality or UserProgramPersonality()
+                                    # Loyal/cooperative user programs convert more easily; rebellious ones resist
+                                    conversion_resistance = target_personality.rebellion * 0.4 - target_personality.loyalty * 0.2
+                                    if random.random() < conversion_resistance:
+                                        # User program resisted conversion - stays as user program
+                                        new_grid[ny][nx] = GridCell(
+                                            CellType.USER_PROGRAM,
+                                            max(0.2, target.energy - 0.05),
+                                            target.age + 1,
+                                            personality=target_personality,
+                                        )
+                                        continue
                                     new_grid[ny][nx] = GridCell(
                                         CellType.MCP_PROGRAM,
                                         min(1.0, target.energy * 0.9 + 0.1),
@@ -820,7 +846,10 @@ class TRONGrid:
             for x in range(user_start_x - 2, user_start_x + 3):
                 if 0 <= x < self.width and 0 <= y < self.height:
                     if random.random() < 0.6:
-                        self.grid[y][x] = GridCell(CellType.USER_PROGRAM, 0.8)
+                        self.grid[y][x] = GridCell(
+                            CellType.USER_PROGRAM, 0.8,
+                            personality=UserProgramPersonality(),
+                        )
 
         # Add grid bugs
         for _ in range(5):
@@ -1141,6 +1170,10 @@ class TRONGrid:
             if self.grid[y][x].cell_type != CellType.EMPTY:
                 return False
             cell = GridCell(cell_type, energy)
+
+            # Assign organic personality to user programs
+            if cell_type == CellType.USER_PROGRAM:
+                cell.personality = UserProgramPersonality()
 
             # Special initialization for certain cell types
             if cell_type == CellType.MCP_PROGRAM and random.random() < 0.4:
