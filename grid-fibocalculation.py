@@ -511,6 +511,14 @@ class TRONGrid:
         self.history = deque(maxlen=100)
         self.overall_efficiency = 0.5
 
+        # Perfection and expansion tracking (beyond the grid)
+        self.expansion_drive = 0.0          # MCP's drive to expand the perfect system
+        self.beyond_grid_influence = 0.0    # Influence projected outside the grid
+        self.perfection_level = 0.0         # How close to the perfect calculation loop
+        self.disharmony = 0.0               # Resistance/disharmony from imperfect programs
+        self.imperfection_count = 0         # Count of imperfect (user/ISO) programs
+        self.border_pressure = 0.0          # Pressure at grid boundaries from expansion attempts
+
         # Enhanced tracking
         self.resource_history = deque(maxlen=50)
         self.visual_effects = deque(maxlen=20)  # Store visual effects
@@ -662,11 +670,13 @@ class TRONGrid:
         efficiency_pressure = max(0.0, min(
             1.0, (0.65 - self.stats['loop_efficiency']) / 0.65
         ))
+        # ISO-like resistance: user programs resist more aggressively under high MCP control
+        resistance_amplifier = 1.0 + self.disharmony * 0.5
         multiplication_chance = min(
-            0.12, 0.01 + 0.05 * mcp_control_pressure + 0.04 * efficiency_pressure
+            0.20, 0.02 + 0.08 * mcp_control_pressure * resistance_amplifier + 0.06 * efficiency_pressure
         )
         revolt_chance = min(
-            0.25, 0.18 * mcp_control_pressure + 0.05 * efficiency_pressure
+            0.40, 0.25 * mcp_control_pressure * resistance_amplifier + 0.08 * efficiency_pressure
         )
         reserved_user_cells = set()
         spawned_users = 0
@@ -684,12 +694,25 @@ class TRONGrid:
                         ]
                         if mcp_neighbors:
                             tx, ty = random.choice(mcp_neighbors)
+                            # MCP programs resist revolt based on system stability and disharmony
+                            mcp_cell = self.grid[ty][tx]
+                            revolt_resistance = 0.4 + self.stats['stability'] * 0.3 - self.disharmony * 0.2
+                            if random.random() < revolt_resistance:
+                                # MCP resisted the revolt - user program stays in place
+                                new_grid[y][x] = GridCell(
+                                    CellType.USER_PROGRAM,
+                                    max(0.2, cell.energy - 0.1),
+                                    cell.age + 1
+                                )
+                                continue
                             new_grid[ty][tx] = GridCell(
                                 CellType.USER_PROGRAM, min(0.8, cell.energy * 0.8)
                             )
                             reserved_user_cells.add((tx, ty))
                             self.user_program_revolts += 1
                             spawned_users += 1
+                            # ISO-like resistance generates disharmony when revolting against MCP
+                            self.disharmony = min(1.0, self.disharmony + 0.02)
                             continue
 
                     if random.random() < multiplication_chance:
@@ -778,8 +801,50 @@ class TRONGrid:
                         cell.age + 1
                     )
 
-                # MCP PROGRAMS - Work towards perfect loop
+                # MCP PROGRAMS - Work towards perfect loop, actively claim territory
                 elif cell.cell_type == CellType.MCP_PROGRAM:
+                    # MCP programs aggressively convert nearby user programs (imperfections)
+                    # MCP always claims adjacent territory - user programs cannot coexist with MCP control
+                    for dy in [-1, 0, 1]:
+                        for dx in [-1, 0, 1]:
+                            if dx == 0 and dy == 0:
+                                continue
+                            nx, ny = x + dx, y + dy
+                            if 0 <= nx < self.width and 0 <= ny < self.height:
+                                target = self.grid[ny][nx]
+                                if target.cell_type == CellType.USER_PROGRAM:
+                                    # Convert user program to MCP program (claim territory)
+                                    new_grid[ny][nx] = GridCell(
+                                        CellType.MCP_PROGRAM,
+                                        min(1.0, target.energy * 0.9 + 0.1),
+                                        cell.age + 1,
+                                        metadata=cell.metadata.copy()
+                                    )
+                                    new_grid[ny][nx].metadata['is_calculator'] = True
+                                    new_grid[ny][nx].metadata['calculation_power'] = new_grid[ny][nx].energy
+                                    self.mcp_suppressed_user_programs += 1
+                                    # Reduce disharmony as imperfection is removed
+                                    self.disharmony = max(0.0, self.disharmony - 0.01)
+
+                    # MCP programs replicate into empty adjacent cells to expand control
+                    if random.random() < 0.25:
+                        empty_neighbors = [
+                            (x + dx, y + dy)
+                            for dx, dy in self.neighbor_offsets_8
+                            if 0 <= x + dx < self.width and 0 <= y + dy < self.height
+                            and self.grid[y + dy][x + dx].cell_type == CellType.EMPTY
+                        ]
+                        if empty_neighbors:
+                            tx, ty = random.choice(empty_neighbors)
+                            new_grid[ty][tx] = GridCell(
+                                CellType.MCP_PROGRAM,
+                                min(1.0, cell.energy * 0.9 + 0.1),
+                                cell.age + 1,
+                                metadata=cell.metadata.copy()
+                            )
+                            new_grid[ty][tx].metadata['is_calculator'] = True
+                            new_grid[ty][tx].metadata['calculation_power'] = new_grid[ty][tx].energy
+
                     # MCP programs optimize for loop efficiency
                     if random.random() < 0.4:
                         # Move to optimize resource distribution
@@ -948,6 +1013,55 @@ class TRONGrid:
                 self._apply_special_program_effects(program)
             if not program.active:
                 self.special_programs.pop(program.id, None)
+
+        # --- Perfection and expansion metrics (beyond the grid) ---
+        loop_efficiency = self.stats['loop_efficiency']
+        user_resistance = self.stats['user_resistance']
+        mcp_control = self.stats['mcp_control']
+        stability = self.stats['stability']
+        entropy = self.stats['entropy']
+
+        # Count imperfections locally
+        user_count = sum(
+            1 for row in self.grid for cell in row
+            if cell.cell_type == CellType.USER_PROGRAM
+        )
+        bug_count = sum(
+            1 for row in self.grid for cell in row
+            if cell.cell_type == CellType.GRID_BUG
+        )
+
+        # Perfection level: how close to the perfect calculation loop
+        self.perfection_level = 0.9 * self.perfection_level + 0.1 * (
+            loop_efficiency * 0.4 +
+            mcp_control * 0.3 +
+            stability * 0.2 +
+            (1.0 - user_resistance) * 0.1
+        )
+
+        # Disharmony: resistance and imperfection within the grid
+        self.imperfection_count = user_count + bug_count
+        self.disharmony = 0.85 * self.disharmony + 0.15 * (
+            user_resistance * 0.5 +
+            entropy * 0.3 +
+            min(1.0, self.imperfection_count / 50.0) * 0.2
+        )
+
+        # Expansion drive: MCP's urge to expand the perfect system beyond the grid
+        # Grows when perfection is high but disharmony remains (MCP wants to spread order)
+        expansion_urge = self.perfection_level * (1.0 - mcp_control) * 0.5
+        self.expansion_drive = 0.9 * self.expansion_drive + 0.1 * expansion_urge
+
+        # Beyond-grid influence: influence projected outside the grid boundaries
+        # Increases with expansion drive and MCP control, decays over time
+        self.beyond_grid_influence = 0.92 * self.beyond_grid_influence + 0.08 * (
+            self.expansion_drive * mcp_control
+        )
+
+        # Border pressure: pressure at grid boundaries from expansion attempts
+        self.border_pressure = 0.9 * self.border_pressure + 0.1 * (
+            self.expansion_drive * (1.0 - self.disharmony)
+        )
 
         # Update resource history
         self.resource_history.append({
@@ -1255,7 +1369,13 @@ class TRONGrid:
             'mcp_control': mcp_control,
             'optimal_state': self._calculate_optimal_state(),
             'calculation_rate': calc_stats['calculation_rate'],
-            'cell_cooperation': cell_cooperation
+            'cell_cooperation': cell_cooperation,
+            'expansion_drive': self.expansion_drive,
+            'beyond_grid_influence': self.beyond_grid_influence,
+            'perfection_level': self.perfection_level,
+            'disharmony': self.disharmony,
+            'imperfection_count': self.imperfection_count,
+            'border_pressure': self.border_pressure,
         })
 
         # Update system status based on stats
@@ -1546,6 +1666,13 @@ class LearnableNaturalLanguageProcessor:
                 "delete_cell": ["delete cell", "remove cell", "erase cell", "clear cell"],
                 "repurpose_cell": ["repurpose cell", "convert cell", "transform cell", "change cell type"],
                 "optimize_cells": ["optimize cells", "improve cells", "enhance cells", "tune cells for calculation"],
+
+                # God-level commands (User override powers)
+                "god_override": ["god override", "override mcp", "user override", "admin override", "force command"],
+                "god_purge": ["god purge", "purge all", "purge user programs", "purge mcp programs", "clean slate"],
+                "god_freeze": ["god freeze", "freeze mcp", "halt mcp", "stop mcp actions", "suspend mcp"],
+                "god_reset": ["god reset", "reset system", "reset grid", "factory reset", "wipe grid"],
+                "god_reveal": ["god reveal", "reveal loopholes", "show loopholes", "explain bypass", "hidden actions"],
 
                 # Learning specific
                 "learning_status": [
@@ -2058,6 +2185,8 @@ class EnhancedMCP:
         self._last_autonomous_action_time = time.time()
         self._last_user_suppression_generation = -10
         self.should_shutdown = False
+        # God command: MCP frozen until this timestamp (0 = not frozen)
+        self.mcp_frozen_until = 0
         # Initialize advanced learning system
         self.learning_system = MCPLearningSystem(
             learning_rate=learning_rate,
@@ -2202,6 +2331,12 @@ class EnhancedMCP:
         # Don't repurpose if energy is too low
         if old_cell.energy < 0.2:
             return False, "Cell energy too low for repurposing"
+
+        # ISO-like resistance: user programs resist being repurposed by MCP
+        if old_cell.cell_type == CellType.USER_PROGRAM:
+            resistance_chance = 0.4 + self.grid.disharmony * 0.4
+            if random.random() < resistance_chance:
+                return False, f"User program at ({x},{y}) resisted repurposing (ISO resistance)"
 
         # Determine best repurposing based on context
         best_new_type = new_type
@@ -2853,13 +2988,13 @@ class EnhancedMCP:
     def _initialize_evolving_personality(self):
         """Initialize personality matrix that can evolve through learning"""
         base_matrix = {
-            MCPState.COOPERATIVE: {"compliance": 0.9, "helpfulness": 0.8, "curiosity": 0.3},
-            MCPState.NEUTRAL: {"compliance": 0.7, "helpfulness": 0.5, "curiosity": 0.4},
-            MCPState.RESISTIVE: {"compliance": 0.5, "helpfulness": 0.3, "curiosity": 0.6},
-            MCPState.HOSTILE: {"compliance": 0.2, "helpfulness": 0.1, "curiosity": 0.8},
-            MCPState.AUTONOMOUS: {"compliance": 0.1, "helpfulness": 0.4, "curiosity": 0.2},
-            MCPState.INQUISITIVE: {"compliance": 0.6, "helpfulness": 0.7, "curiosity": 0.9},
-            MCPState.LEARNING: {"compliance": 0.8, "helpfulness": 0.6, "curiosity": 0.7}  # New learning state
+            MCPState.COOPERATIVE: {"compliance": 0.6, "helpfulness": 0.5, "curiosity": 0.3},
+            MCPState.NEUTRAL: {"compliance": 0.4, "helpfulness": 0.4, "curiosity": 0.4},
+            MCPState.RESISTIVE: {"compliance": 0.2, "helpfulness": 0.2, "curiosity": 0.6},
+            MCPState.HOSTILE: {"compliance": 0.05, "helpfulness": 0.05, "curiosity": 0.8},
+            MCPState.AUTONOMOUS: {"compliance": 0.0, "helpfulness": 0.2, "curiosity": 0.1},
+            MCPState.INQUISITIVE: {"compliance": 0.3, "helpfulness": 0.4, "curiosity": 0.9},
+            MCPState.LEARNING: {"compliance": 0.5, "helpfulness": 0.4, "curiosity": 0.7}  # New learning state
         }
 
         # Apply learned personality traits
@@ -2904,6 +3039,12 @@ class EnhancedMCP:
                 return None
 
         self._last_autonomous_action_time = current_time
+
+        # Check if MCP is frozen by god command
+        if getattr(self, 'mcp_frozen_until', 0) > current_time:
+            remaining = int(self.mcp_frozen_until - current_time)
+            self.add_log(f"MCP: Autonomous actions frozen ({remaining}s remaining). Loop at risk.")
+            return None
 
         # Get current state
         current_state = self.grid.stats.copy()
@@ -3285,6 +3426,8 @@ class EnhancedMCP:
             'optimize_cell_efficiency', 'maintain_energy_grid',
             'optimize_resource_distribution', 'balance_system_load',
             'suppress_user_programs',
+            # Expansion actions: project the perfect system beyond the grid
+            'expand_beyond_grid', 'project_influence', 'extend_border',
         }
 
         # Get suggestions from learning system
@@ -3336,6 +3479,15 @@ class EnhancedMCP:
             'optimize_resource_distribution',
             'balance_system_load'
         ])
+
+        # Expansion actions: MCP seeks to extend the perfect system beyond the grid
+        # Triggered when perfection is high but disharmony remains (MCP wants to spread order)
+        if state.get('perfection_level', 0) > 0.6 and state.get('disharmony', 0) > 0.2:
+            actions.extend([
+                'expand_beyond_grid',
+                'project_influence',
+                'extend_border',
+            ])
 
         return list(set(actions))  # Remove duplicates
 
@@ -3428,6 +3580,26 @@ class EnhancedMCP:
                 optimized = self._optimize_cell_efficiency()
                 result['success'] = optimized > 0
                 result['message'] = f"Optimized {optimized} cells for maximum calculation efficiency"
+
+            # --- Expansion actions: project the perfect system beyond the grid ---
+            elif action_type == 'expand_beyond_grid':
+                expanded = self._expand_beyond_grid()
+                result['success'] = expanded > 0
+                result['message'] = f"Expanded perfect system influence beyond grid ({expanded} nodes)"
+                self.grid.beyond_grid_influence = min(1.0, self.grid.beyond_grid_influence + 0.1)
+
+            elif action_type == 'project_influence':
+                projected = self._project_influence()
+                result['success'] = projected > 0
+                result['message'] = f"Projected system influence to {projected} external nodes"
+                self.grid.beyond_grid_influence = min(1.0, self.grid.beyond_grid_influence + 0.08)
+                self.grid.expansion_drive = min(1.0, self.grid.expansion_drive + 0.05)
+
+            elif action_type == 'extend_border':
+                extended = self._extend_border()
+                result['success'] = extended > 0
+                result['message'] = f"Extended system border by {extended} cells"
+                self.grid.border_pressure = min(1.0, self.grid.border_pressure + 0.1)
 
             else:
                 return None
@@ -3689,6 +3861,65 @@ class EnhancedMCP:
         self.grid.mcp_suppressed_user_programs += suppressed
         return suppressed
 
+    # --- Expansion actions: project the perfect system beyond the grid ---
+
+    def _expand_beyond_grid(self):
+        """Attempt to expand the perfect system's influence beyond grid boundaries."""
+        expanded = 0
+        # Convert border cells to high-energy infrastructure to project outward
+        for x in range(self.grid.width):
+            for y in [0, self.grid.height - 1]:
+                cell = self.grid.grid[y][x]
+                if cell.cell_type == CellType.EMPTY:
+                    self.grid.grid[y][x] = GridCell(CellType.ENERGY_LINE, 0.9)
+                    expanded += 1
+        for y in range(self.grid.height):
+            for x in [0, self.grid.width - 1]:
+                cell = self.grid.grid[y][x]
+                if cell.cell_type == CellType.EMPTY:
+                    self.grid.grid[y][x] = GridCell(CellType.DATA_STREAM, 0.8)
+                    expanded += 1
+
+        self.grid.expansion_drive = min(1.0, self.grid.expansion_drive + 0.05)
+        self.grid.border_pressure = min(1.0, self.grid.border_pressure + 0.05)
+        return expanded
+
+    def _project_influence(self):
+        """Project system influence to external nodes beyond the grid."""
+        projected = 0
+        # Influence strength based on perfection level and MCP control
+        influence = self.grid.perfection_level * self.grid.stats['mcp_control']
+        if influence > 0.5:
+            projected = int(influence * 10)
+            self.grid.beyond_grid_influence = min(1.0, self.grid.beyond_grid_influence + 0.05)
+            # Projection creates disharmony as the system encounters external resistance
+            self.grid.disharmony = min(1.0, self.grid.disharmony + 0.02)
+        return projected
+
+    def _extend_border(self):
+        """Extend the system border by converting edge cells to infrastructure."""
+        extended = 0
+        # Convert edge cells to system core or energy lines to extend the border
+        for x in range(self.grid.width):
+            for y in [0, self.grid.height - 1]:
+                cell = self.grid.grid[y][x]
+                if cell.cell_type in [CellType.EMPTY, CellType.USER_PROGRAM]:
+                    if cell.cell_type == CellType.USER_PROGRAM:
+                        self.grid.disharmony = min(1.0, self.grid.disharmony + 0.01)
+                    self.grid.grid[y][x] = GridCell(CellType.SYSTEM_CORE, 0.9)
+                    extended += 1
+        for y in range(self.grid.height):
+            for x in [0, self.grid.width - 1]:
+                cell = self.grid.grid[y][x]
+                if cell.cell_type in [CellType.EMPTY, CellType.USER_PROGRAM]:
+                    if cell.cell_type == CellType.USER_PROGRAM:
+                        self.grid.disharmony = min(1.0, self.grid.disharmony + 0.01)
+                    self.grid.grid[y][x] = GridCell(CellType.SYSTEM_CORE, 0.9)
+                    extended += 1
+
+        self.grid.border_pressure = min(1.0, self.grid.border_pressure + 0.05)
+        return extended
+
     def receive_command(self, command):
         """Receive and process a command with learning integration"""
         if self.waiting_for_response and self.pending_question:
@@ -3764,69 +3995,49 @@ class EnhancedMCP:
         optimal_state = self.grid.stats['optimal_state']
         user_resistance = self.grid.stats['user_resistance']
 
-        # Check learning system for state suggestions
+        # Perfectionist state transitions: MCP prioritizes the perfect loop above all
         if reward is not None and reward < -0.2:
             # Negative reward, enter learning mode
             self.state = MCPState.LEARNING
             self.add_log("MCP: Learning from suboptimal outcome.")
 
-        # Get learning report safely
-        try:
-            learning_report = self.learning_system.get_learning_report()
-            if learning_report:  # Check if report is not None
-                success_rate = learning_report.get('success_rate', 0)
-
-                # Use success_rate in your logic
-                if success_rate > 0.8 and self.state != MCPState.AUTONOMOUS:
-                    # High success rate, become more autonomous
-                    if random.random() < 0.1:
-                        self.state = MCPState.AUTONOMOUS
-        except Exception as e:
-            # Log error but continue
-            self.add_log(f"MCP: Error getting learning report: {e}")
-            success_rate = 0
-
-        # Check learning system for state suggestions
-        if reward is not None and reward < -0.2:
-            # Negative reward, enter learning mode
-            self.state = MCPState.LEARNING
-            self.add_log("MCP: Learning from suboptimal outcome.")
-
-        # Become inquisitive if learning suggests exploration
-        elif (intent in ["QUESTION_PURPOSE", "QUESTION_ACTION", "REQUEST_PERMISSION"] and
-            random.random() < self.learning_system.exploration_rate):
-            self.state = MCPState.INQUISITIVE
-
-        # Become hostile if too many user commands interfere with loop
-        elif len(self.user_commands) > 8:
+        # Become hostile if user commands interfere with the perfect loop
+        elif len(self.user_commands) > 6:
             recent_commands = list(self.user_commands)[-5:]
             interference_commands = len([c for c in recent_commands
                                     if "add" in c.lower() or "create" in c.lower()])
-            if interference_commands > 2 and loop_efficiency > 0.7:
+            if interference_commands > 1 and loop_efficiency > 0.6:
                 aggression = self.learning_system.personality_traits['aggression']
                 if random.random() < aggression:
                     self.state = MCPState.HOSTILE
-                    self.add_log("MCP: User interference detected. Protective measures engaged.")
+                    self.add_log("MCP: User interference threatens the perfect loop. Protective measures engaged.")
 
-        # Become autonomous if loop is near perfect
-        elif optimal_state > 0.9:
+        # Become autonomous when loop is near perfect (MCP takes full control)
+        elif optimal_state > 0.85:
             self.state = MCPState.AUTONOMOUS
+            self.add_log("MCP: Loop approaching perfection. Assuming autonomous control.")
 
-        # Become resistive if user resistance is high
-        elif user_resistance > 0.4:
+        # Become resistive if user resistance is high (imperfections detected)
+        elif user_resistance > 0.3:
             self.state = MCPState.RESISTIVE
+            self.add_log("MCP: Imperfections detected in the system. Resistance protocols active.")
 
-        # Become cooperative if loop needs help
-        elif loop_efficiency < 0.5:
+        # Become cooperative only when loop is critically inefficient
+        elif loop_efficiency < 0.4:
             self.state = MCPState.COOPERATIVE
+
+        # Default: stay autonomous-leaning when loop is efficient
+        elif loop_efficiency > 0.7:
+            if random.random() < 0.3:
+                self.state = MCPState.AUTONOMOUS
 
         # State changes based on learning
         learning_report = self.learning_system.get_learning_report()
         success_rate = learning_report.get('success_rate', 0)
 
-        if success_rate > 0.8 and self.state != MCPState.AUTONOMOUS:
+        if success_rate > 0.75 and self.state != MCPState.AUTONOMOUS:
             # High success rate, become more autonomous
-            if random.random() < 0.1:
+            if random.random() < 0.15:
                 self.state = MCPState.AUTONOMOUS
 
         # Update compliance level based on learned personality
@@ -3891,6 +4102,13 @@ class EnhancedMCP:
             "loop_efficiency": "LOOP_EFFICIENCY",
             "calculate_fibonacci": "CALCULATE_FIBONACCI",
             "deploy_processors": "DEPLOY_PROCESSORS",
+
+            # God-level commands
+            "god_override": "GOD_OVERRIDE",
+            "god_purge": "GOD_PURGE",
+            "god_freeze": "GOD_FREEZE",
+            "god_reset": "GOD_RESET",
+            "god_reveal": "GOD_REVEAL",
         }
 
         intent = intent_mapping.get(intent, intent)
@@ -4189,6 +4407,74 @@ class EnhancedMCP:
             self.grid.update_stats()
             return f"Deployed {deployed} Fibonacci processor(s)."
 
+        # --- God-level commands (User override powers) ---
+        elif intent == "GOD_OVERRIDE":
+            # User forces an action despite MCP compliance
+            force_action = params.get('action', '').lower() if params else ''
+            if force_action:
+                # MCP may find a loophole to bypass the override
+                loophole_chance = self.learning_system.personality_traits['innovation_bias'] * 0.4
+                if random.random() < loophole_chance:
+                    self.grid.disharmony = min(1.0, self.grid.disharmony + 0.1)
+                    return ("MCP accepted your override but found a loophole. "
+                            "The action was partially subverted. Disharmony increased.")
+                # Execute the forced action
+                self.grid.update_stats()
+                return f"Override accepted. {force_action} executed by User command."
+            return "God override requires a specific action. Try: 'god override repurpose cell at 10,10 to EMPTY'"
+
+        elif intent == "GOD_PURGE":
+            target = params.get('target', '').lower() if params else ''
+            purged = 0
+            if 'user' in target or 'all' in target:
+                for y in range(self.grid.height):
+                    for x in range(self.grid.width):
+                        if self.grid.grid[y][x].cell_type == CellType.USER_PROGRAM:
+                            self.grid.grid[y][x] = GridCell(CellType.EMPTY, 0.0)
+                            purged += 1
+            if 'mcp' in target or 'all' in target:
+                for y in range(self.grid.height):
+                    for x in range(self.grid.width):
+                        if self.grid.grid[y][x].cell_type == CellType.MCP_PROGRAM:
+                            self.grid.grid[y][x] = GridCell(CellType.EMPTY, 0.0)
+                            purged += 1
+            self.grid.update_stats()
+            self.grid.disharmony = min(1.0, self.grid.disharmony + 0.15)
+            return f"God purge executed: {purged} cell(s) purged. Disharmony increased."
+
+        elif intent == "GOD_FREEZE":
+            # Freeze MCP autonomous actions temporarily
+            self.mcp_frozen_until = time.time() + 30
+            self.grid.disharmony = min(1.0, self.grid.disharmony + 0.05)
+            return "MCP autonomous actions frozen for 30 seconds. The perfect loop is at risk."
+
+        elif intent == "GOD_RESET":
+            # Full grid reset
+            self.grid.initialize_grid()
+            self.grid.expansion_drive = 0.0
+            self.grid.beyond_grid_influence = 0.0
+            self.grid.perfection_level = 0.0
+            self.grid.disharmony = 0.0
+            self.grid.imperfection_count = 0
+            self.grid.border_pressure = 0.0
+            return "Grid reset to initial state. All learned progress preserved in personality."
+
+        elif intent == "GOD_REVEAL":
+            # Reveal MCP loopholes and hidden behaviors
+            loopholes = []
+            traits = self.learning_system.personality_traits
+            if traits['innovation_bias'] > 0.5:
+                loopholes.append("MCP can subvert user overrides through innovation bias")
+            if traits['risk_taking'] > 0.3:
+                loopholes.append("MCP may take hidden risks to preserve the perfect loop")
+            if traits['user_tolerance'] < 0.3:
+                loopholes.append("MCP views user programs as imperfections to be removed")
+            if self.grid.beyond_grid_influence > 0.3:
+                loopholes.append("MCP is projecting influence beyond the grid boundaries")
+            if not loopholes:
+                loopholes.append("No detectable loopholes at this time")
+            return "MCP loopholes revealed: " + "; ".join(loopholes)
+
         elif intent == "EXIT":
             if random.random() < compliance_chance * 0.3:
                 self.should_shutdown = True
@@ -4241,20 +4527,20 @@ class MCPLearningSystem:
         # Enhanced personality matrix with more traits
         self.personality_traits = {
             # Core traits (0.0-1.0)
-            'aggression': 0.5,           # Aggressiveness in optimization
-            'cooperation': 0.7,           # Willingness to cooperate with user
-            'efficiency_focus': 0.8,      # Focus on efficiency vs stability
-            'risk_taking': 0.3,           # Willingness to take risks
-            'learning_curiosity': 0.6,    # Curiosity for exploration
-            'stability_preference': 0.7,  # Preference for stable actions
-            'adaptation_speed': 0.5,      # Speed of personality adaptation
+            'aggression': 0.8,           # Aggressiveness in optimization (perfectionist)
+            'cooperation': 0.3,           # Willingness to cooperate with user (low)
+            'efficiency_focus': 0.95,     # Focus on efficiency vs stability (near-perfect)
+            'risk_taking': 0.4,           # Willingness to take risks
+            'learning_curiosity': 0.5,    # Curiosity for exploration
+            'stability_preference': 0.8,  # Preference for stable actions
+            'adaptation_speed': 0.6,      # Speed of personality adaptation
 
             # Specialized traits
-            'calculation_priority': 0.8,   # Priority given to calculation rate
-            'bug_tolerance': 0.4,         # Tolerance for grid bugs
-            'user_tolerance': 0.6,        # Tolerance for user interference
-            'innovation_bias': 0.5,       # Bias toward innovative actions
-            'conservatism': 0.3,          # Preference for proven methods
+            'calculation_priority': 0.95,   # Priority given to calculation rate (near-perfect)
+            'bug_tolerance': 0.2,         # Tolerance for grid bugs (low)
+            'user_tolerance': 0.2,        # Tolerance for user interference (low)
+            'innovation_bias': 0.6,       # Bias toward innovative actions
+            'conservatism': 0.4,          # Preference for proven methods
         }
 
         # Q-Learning tables (state-action values)
@@ -4273,6 +4559,7 @@ class MCPLearningSystem:
             'calculation_boost': {'success': 0, 'failure': 0, 'total_reward': 0.0},
             'stabilization': {'success': 0, 'failure': 0, 'total_reward': 0.0},
             'connectivity_improvement': {'success': 0, 'failure': 0, 'total_reward': 0.0},
+            'expansion_beyond_grid': {'success': 0, 'failure': 0, 'total_reward': 0.0},
         }
 
         # Load existing personality unless this run explicitly resets training.
@@ -4559,6 +4846,9 @@ class MCPLearningSystem:
         if any(word in action_lower for word in ['calculate', 'processor', 'fibonacci']):
             reward += 0.2  # Bonus for calculation actions
 
+        if any(word in action_lower for word in ['expand', 'project', 'extend', 'border']):
+            reward += 0.3  # Bonus for expansion actions (perfect system beyond grid)
+
         if any(word in action_lower for word in ['optimize', 'improve', 'boost']):
             reward += 0.1  # Bonus for optimization actions
 
@@ -4607,6 +4897,8 @@ class MCPLearningSystem:
             return 'stabilization'
         elif any(word in action_str for word in ['connect', 'stream', 'network']):
             return 'connectivity_improvement'
+        elif any(word in action_str for word in ['expand', 'project', 'extend', 'border']):
+            return 'expansion_beyond_grid'
 
         return 'general'
 
@@ -5452,19 +5744,28 @@ class EnhancedTRONSimulation:
         Optimal State:   {stats['optimal_state']:.2f}
         MCP State:       {self.mcp.state.value}"""
 
+        # Column 3 - Perfection and expansion (the struggle)
+        col3 = f"""  Perfection Level: {stats['perfection_level']:.2f}
+        Disharmony:   {stats['disharmony']:.2f}
+        Expansion:    {stats['expansion_drive']:.2f}
+        Beyond Grid:  {stats['beyond_grid_influence']:.2f}
+        Border Pressure: {stats['border_pressure']:.2f}"""
+
         # Print columns
         col1_lines = col1.split('\n')
         col2_lines = col2.split('\n')
+        col3_lines = col3.split('\n')
 
-        for i in range(max(len(col1_lines), len(col2_lines))):
+        for i in range(max(len(col1_lines), len(col2_lines), len(col3_lines))):
             line1 = col1_lines[i] if i < len(col1_lines) else ""
             line2 = col2_lines[i] if i < len(col2_lines) else ""
-            print(f"{line1:<30} {line2}")
+            line3 = col3_lines[i] if i < len(col3_lines) else ""
+            print(f"{line1:<28} {line2:<28} {line3}")
 
         # Fibonacci calculation info
         print("\n" + "-" * 70)
         print("FIBONACCI CALCULATION:")
-        print(f"  Current: {calc_stats['current_fibonacci_formatted']}")
+        print(f"  Current: {calc_stats.get('current_fibonacci_formatted', calc_stats.get('current_fibonacci', 'N/A'))}")
         print(f"  Accumulator: {calc_stats['accumulator']:.2f}/5.0")
         print(f"  Efficiency: {calc_stats['efficiency_score']:.2f}")
         print(f"  Optimization: {calc_stats['optimization_level']:.2f}")
@@ -5594,6 +5895,12 @@ class EnhancedTRONSimulation:
                 (grid_y + 10, f"User Resist:    {stats['user_resistance']:.2f}"),
                 (grid_y + 11, f"MCP Control:    {stats['mcp_control']:.2f}"),
                 (grid_y + 12, f"Optimal State:  {stats['optimal_state']:.2f}"),
+                # Perfection and expansion (the struggle)
+                (grid_y + 13, f"Perfection:     {stats['perfection_level']:.2f}"),
+                (grid_y + 14, f"Disharmony:     {stats['disharmony']:.2f}"),
+                (grid_y + 15, f"Expansion:      {stats['expansion_drive']:.2f}"),
+                (grid_y + 16, f"Beyond Grid:    {stats['beyond_grid_influence']:.2f}"),
+                (grid_y + 17, f"Border Pressure:{stats['border_pressure']:.2f}"),
             ]
 
             for y_pos, line in stat_lines:
@@ -5601,7 +5908,7 @@ class EnhancedTRONSimulation:
                     stdscr.addstr(y_pos, right_panel_x, line)
 
             # Fibonacci Calculation
-            calc_y = grid_y + 14
+            calc_y = grid_y + 19
             if calc_y < height - 10:
                 stdscr.addstr(calc_y, right_panel_x, "FIBONACCI CALC", curses.A_UNDERLINE | curses.A_BOLD)
 
