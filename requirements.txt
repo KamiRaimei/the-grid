@@ -1,0 +1,2 @@
+numpy
+windows-curses; platform_system == "Windows"
