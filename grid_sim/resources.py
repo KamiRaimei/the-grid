@@ -295,9 +295,33 @@ class GlobalEnergyBudget:
             self._record_history('consume_failed', amount, reason)
             return False
 
-    def spend_on_action(self, amount: float, action_name: str) -> bool:
-        """Spend energy on an MCP autonomous action. Returns True if affordable."""
-        return self.consume(amount, reason=f"mcp_action:{action_name}")
+    def spend_on_action(self, amount: float, action_name: str, force: bool = False) -> bool:
+        """Spend energy on an MCP autonomous action. Returns True if affordable.
+
+        If force=True, allows deficit spending (energy can go to zero/negative)
+        for desperate last-resort actions.
+        """
+        with self._lock:
+            amount = max(0.0, amount)
+            if self.energy >= amount:
+                self.energy -= amount
+                self.total_consumed += amount
+                self._record_history('consume', amount, reason=f"mcp_action:{action_name}")
+                return True
+            # Partial consumption: take whatever remains
+            if self.energy > 0:
+                taken = self.energy
+                self.total_consumed += taken
+                self.energy = 0.0
+                self._record_history('consume_partial', taken, reason=f"mcp_action:{action_name}")
+                if force:
+                    return True
+                return False
+            if force:
+                self._record_history('consume_forced', amount, reason=f"mcp_action:{action_name}")
+                return True
+            self._record_history('consume_failed', amount, reason=f"mcp_action:{action_name}")
+            return False
 
     def can_afford(self, amount: float) -> bool:
         """Check if the budget can afford an amount without spending."""

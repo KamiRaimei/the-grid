@@ -7,7 +7,7 @@ from collections import deque
 from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any
 
-from .cells import CellType, GridCell, MCPState, MCP_ACTION_ENERGY_COSTS, MCP_COMMAND_ENERGY_COSTS
+from .cells import CellType, GridCell, MCPState, MCP_ACTION_ENERGY_COSTS, MCP_COMMAND_ENERGY_COSTS, MCP_DESPERATE_ACTION_ENERGY_COSTS, MCP_ENERGY_PER_USER_KILL, USER_ENERGY_PER_MCP_KILL
 from .grid import TRONGrid
 from .nlp import LearnableNaturalLanguageProcessor
 from .learning import MCPLearningSystem
@@ -17,6 +17,50 @@ from .resources import GlobalEnergyBudget, HardwareResourceCounter
 
 class EnhancedMCP:
     """Enhanced Master Control Program with learning capabilities"""
+
+    # Maps mutated action variants to their base action types for execution
+    ACTION_VARIANT_MAP = {
+        # maintain_energy_grid variants
+        'maintain_energy_grid_aggressive': 'maintain_energy_grid',
+        'maintain_energy_grid_efficient': 'maintain_energy_grid',
+        'overproduce_energy': 'maintain_energy_grid',
+        # optimize_calculation_loop variants
+        'optimize_calculation_loop_aggressive': 'optimize_calculation_loop',
+        'optimize_calculation_loop_conservative': 'optimize_calculation_loop',
+        'hyper_optimize_loop': 'optimize_calculation_loop',
+        # deploy_fibonacci_processors variants
+        'deploy_fibonacci_processors_mass': 'deploy_fibonacci_processors',
+        'deploy_calculators_strategic': 'deploy_fibonacci_processors',
+        'spawn_processor_cluster': 'deploy_fibonacci_processors',
+        # suppress_user_programs variants
+        'suppress_user_programs_harsh': 'suppress_user_programs',
+        'suppress_user_programs_selective': 'suppress_user_programs',
+        'eliminate_user_resistance': 'suppress_user_programs',
+        # quarantine_grid_bugs variants
+        'quarantine_grid_bugs_total': 'quarantine_grid_bugs',
+        'contain_bug_outbreak_extreme': 'contain_bug_outbreak',
+        'isolate_all_bugs': 'contain_bug_outbreak',
+        # boost_calculation_rate variants
+        'overdrive_calculators_extreme': 'boost_calculation_rate',
+        'push_calculation_limits': 'boost_calculation_rate',
+        'overclock_processors': 'boost_calculation_rate',
+        # cannibalize_user_programs variants
+        'cannibalize_user_programs_aggressive': 'cannibalize_user_programs',
+        'cannibalize_user_programs_selective': 'cannibalize_user_programs',
+        'harvest_user_energy': 'cannibalize_user_programs',
+        # emergency_suppression variants
+        'rapid_suppression': 'emergency_suppression',
+        'mass_conversion': 'emergency_suppression',
+        'purge_user_programs': 'emergency_suppression',
+        # scavenge_infrastructure variants
+        'scavenge_energy_lines': 'scavenge_infrastructure',
+        'scavenge_data_streams': 'scavenge_infrastructure',
+        'drain_infrastructure': 'scavenge_infrastructure',
+        # desperate_repurpose variants
+        'force_repurpose_cells': 'desperate_repurpose',
+        'convert_all_inefficient': 'desperate_repurpose',
+        'repurpose_with_resistance': 'desperate_repurpose',
+    }
 
     def __init__(self, grid, learning_rate=None, exploration_rate=None, reset_learning=False):
         self.grid = grid
@@ -929,11 +973,88 @@ class EnhancedMCP:
             )
 
         if not affordable:
-            self.add_log(
-                "[MCP THOUGHT] ENERGY CRITICAL: Cannot afford any action. "
-                "MCP must wait for energy production or reduce consumption."
-            )
-            return None
+            # --- Desperate actions when energy is critical ---
+            # MCP can take low-cost, high-risk actions to survive and optimize
+            desperate_costs = {}
+            for action, base_cost in MCP_DESPERATE_ACTION_ENERGY_COSTS.items():
+                actual_cost = base_cost * cost_multiplier
+                if self.grid.energy_budget.can_afford(actual_cost):
+                    desperate_costs[action] = actual_cost
+
+            if desperate_costs:
+                desperate_list = ", ".join(
+                    f"{a} ({c:.1f} energy)" for a, c in sorted(desperate_costs.items())
+                )
+                self.add_log(
+                    f"[MCP THOUGHT] ENERGY CRITICAL: Taking desperate actions: {desperate_list}"
+                )
+                # Select a desperate action via drive competition
+                action_type = self.personality.select_action(
+                    list(desperate_costs.keys()), current_state
+                )
+                if action_type is None:
+                    action_type = list(desperate_costs.keys())[0]
+
+                # Initialize cost from desperate_costs (already includes multiplier)
+                actual_cost = desperate_costs[action_type]
+
+                # --- Action mutation: MCP evolves desperate strategies under pressure ---
+                # Under critical energy, mutation chance increases dramatically
+                generation = self.grid.generation
+                mutated_action = self.learning_system.mutate_action(
+                    action_type, reward=0.0, generation=generation
+                )
+                if mutated_action != action_type:
+                    self.learning_system.record_action_mutation(
+                        action_type, mutated_action, reward=0.0
+                    )
+                    self.add_log(
+                        f"[MCP THOUGHT] Action mutated: {action_type} → {mutated_action} "
+                        f"(generation {generation})"
+                    )
+                    action_type = mutated_action
+                    # Recompute cost based on base action type (variants inherit base cost)
+                    base_action = self.ACTION_VARIANT_MAP.get(action_type, action_type)
+                    if base_action in MCP_DESPERATE_ACTION_ENERGY_COSTS:
+                        actual_cost = MCP_DESPERATE_ACTION_ENERGY_COSTS[base_action] * cost_multiplier
+                    else:
+                        actual_cost = desperate_costs.get(list(desperate_costs.keys())[0], 2.0)
+
+                self.add_log(
+                    f"[MCP THOUGHT] Desperate action: {action_type} | "
+                    f"Energy cost: {actual_cost:.1f}"
+                )
+                action_result = self._execute_autonomous_action(
+                    action_type, current_state, actual_cost
+                )
+                # Skip the normal flow below
+                if action_result:
+                    self.last_action = action_result['message']
+                    self.add_log(f"MCP: {self.last_action}")
+                    return action_result['message']
+                return None
+            else:
+                # --- Last resort: MCP takes the cheapest desperate action even if it goes negative ---
+                # MCP will do whatever it takes to survive, even at energy deficit
+                cheapest_action = min(
+                    MCP_DESPERATE_ACTION_ENERGY_COSTS.items(),
+                    key=lambda x: x[1] * cost_multiplier
+                )
+                action_type = cheapest_action[0]
+                actual_cost = cheapest_action[1] * cost_multiplier
+                self.add_log(
+                    f"[MCP THOUGHT] ENERGY CRITICAL: Cannot afford any action. "
+                    f"Taking last-resort desperate action: {action_type} ({actual_cost:.1f} energy) "
+                    f"despite deficit."
+                )
+                action_result = self._execute_autonomous_action(
+                    action_type, current_state, actual_cost
+                )
+                if action_result:
+                    self.last_action = action_result['message']
+                    self.add_log(f"MCP: {self.last_action}")
+                    return action_result['message']
+                return None
 
         # Log candidate actions with costs
         action_list = ", ".join(
@@ -948,7 +1069,32 @@ class EnhancedMCP:
             self.add_log("[MCP THOUGHT] Drive competition yielded no action. Idling.")
             return None
 
-        actual_cost = affordable[action_type]
+        # --- Action mutation: MCP evolves strategies based on success/failure ---
+        generation = self.grid.generation
+        previous_reward = 0.0
+        if self.learning_system.reward_history:
+            previous_reward = self.learning_system.reward_history[-1]
+        mutated_action = self.learning_system.mutate_action(
+            action_type, reward=previous_reward, generation=generation
+        )
+        if mutated_action != action_type:
+            self.learning_system.record_action_mutation(
+                action_type, mutated_action, reward=previous_reward
+            )
+            self.add_log(
+                f"[MCP THOUGHT] Action mutated: {action_type} → {mutated_action} "
+                f"(generation {generation})"
+            )
+            action_type = mutated_action
+
+        # Recompute cost for (possibly mutated) action
+        if action_type in affordable:
+            actual_cost = affordable[action_type]
+        elif action_type in MCP_ACTION_ENERGY_COSTS:
+            actual_cost = MCP_ACTION_ENERGY_COSTS[action_type] * cost_multiplier
+        else:
+            actual_cost = affordable.get(list(affordable.keys())[0], 5.0)
+
         self.add_log(
             f"[MCP THOUGHT] Selected action: {action_type} | "
             f"Energy cost: {actual_cost:.1f} | "
@@ -1077,9 +1223,21 @@ class EnhancedMCP:
             'impact': 0.0
         }
 
+        # --- Normalize mutated action variants to base action types ---
+        base_action = self.ACTION_VARIANT_MAP.get(action_type, action_type)
+        if base_action != action_type:
+            self.add_log(
+                f"[MCP THOUGHT] Executing variant {action_type} as {base_action}"
+            )
+
         # --- Deduct energy cost from global budget ---
         if energy_cost > 0:
-            if not self.grid.energy_budget.spend_on_action(energy_cost, action_type):
+            # Desperate actions can force deficit spending (MCP will do anything to survive)
+            is_desperate = (
+                action_type in MCP_DESPERATE_ACTION_ENERGY_COSTS
+                or self.ACTION_VARIANT_MAP.get(action_type, action_type) in MCP_DESPERATE_ACTION_ENERGY_COSTS
+            )
+            if not self.grid.energy_budget.spend_on_action(energy_cost, action_type, force=is_desperate):
                 result['message'] = (
                     f"Action {action_type} denied: insufficient energy "
                     f"({self.grid.energy_budget.energy:.1f} available, need {energy_cost:.1f})"
@@ -1093,38 +1251,38 @@ class EnhancedMCP:
             )
 
         try:
-            if action_type == 'optimize_calculation_loop':
+            if base_action == 'optimize_calculation_loop':
                 # Existing optimization logic
                 self._optimize_calculation_loop()
                 result['success'] = True
                 result['message'] = "Optimizing calculation loop using learned strategies"
 
-            elif action_type == 'suppress_user_programs':
+            elif base_action == 'suppress_user_programs':
                 suppressed = self._suppress_user_programs()
                 result['success'] = suppressed > 0
                 result['message'] = f"Suppressed {suppressed} user program(s) during performance degradation"
                 if suppressed:
                     self._last_user_suppression_generation = self.grid.generation
 
-            elif action_type == 'deploy_fibonacci_processors':
+            elif base_action == 'deploy_fibonacci_processors':
                 # Deploy Fibonacci processors
                 deployed = self._deploy_fibonacci_processors(3)
                 result['success'] = deployed > 0
                 result['message'] = f"Deployed {deployed} Fibonacci processors"
 
-            elif action_type == 'quarantine_grid_bugs':
+            elif base_action == 'quarantine_grid_bugs':
                 # Quarantine bugs
                 contained = self._contain_grid_bugs()
                 result['success'] = contained > 0
                 result['message'] = f"Contained {contained} grid bugs"
 
-            elif action_type == 'boost_calculation_rate':
+            elif base_action == 'boost_calculation_rate':
                 # Boost calculation
                 boosted = self._boost_calculation_rate()
                 result['success'] = boosted
                 result['message'] = "Boosted calculation rate through infrastructure optimization"
 
-            elif action_type == 'improve_cell_connectivity':
+            elif base_action == 'improve_cell_connectivity':
                 # Improve connectivity
                 improved = self._improve_cell_connectivity()
                 result['success'] = improved > 0
@@ -1141,56 +1299,169 @@ class EnhancedMCP:
                 deployed = self._deploy_fibonacci_processors(3)
                 result['success'] = deployed > 0
                 result['message'] = f"Deployed {deployed} Fibonacci processors"
-            elif action_type == 'maintain_energy_grid':
+            elif base_action == 'maintain_energy_grid':
                 # Maintain energy
                 maintained = self._maintain_energy_grid()
                 result['success'] = maintained > 0
                 result['message'] = f"Added {maintained} energy lines for system stability"
-            elif action_type == 'optimize_resource_distribution':
+            elif base_action == 'optimize_resource_distribution':
                 optimized = self._optimize_cell_efficiency()
                 result['success'] = optimized > 0
                 result['message'] = f"Optimized {optimized} cells for resource distribution"
-            elif action_type == 'balance_system_load':
+            elif base_action == 'balance_system_load':
                 boosted = self._boost_calculation_rate()
                 result['success'] = boosted
                 result['message'] = "Balanced system load through calculation infrastructure optimization"
-            elif action_type == 'inefficiency_cleanup':
+            elif base_action == 'inefficiency_cleanup':
                 # Delete inefficient cells
                 deleted = self._cleanup_inefficient_cells()
                 result['success'] = deleted > 0
                 result['message'] = f"Cleaned up {deleted} inefficient cells to improve calculation rate"
 
-            elif action_type == 'cell_repurposing':
+            elif base_action == 'cell_repurposing':
                 # Repurpose cells for better calculation
                 repurposed = self._repurpose_inefficient_cells()
                 result['success'] = repurposed > 0
                 result['message'] = f"Repurposed {repurposed} cells for optimal calculation"
 
-            elif action_type == 'optimize_cell_efficiency':
+            elif base_action == 'optimize_cell_efficiency':
                 # Comprehensive cell optimization
                 optimized = self._optimize_cell_efficiency()
                 result['success'] = optimized > 0
                 result['message'] = f"Optimized {optimized} cells for maximum calculation efficiency"
 
             # --- Expansion actions: project the perfect system beyond the grid ---
-            elif action_type == 'expand_beyond_grid':
+            elif base_action == 'expand_beyond_grid':
                 expanded = self._expand_beyond_grid()
                 result['success'] = expanded > 0
                 result['message'] = f"Expanded perfect system influence beyond grid ({expanded} nodes)"
                 self.grid.beyond_grid_influence = min(1.0, self.grid.beyond_grid_influence + 0.1)
 
-            elif action_type == 'project_influence':
+            elif base_action == 'project_influence':
                 projected = self._project_influence()
                 result['success'] = projected > 0
                 result['message'] = f"Projected system influence to {projected} external nodes"
                 self.grid.beyond_grid_influence = min(1.0, self.grid.beyond_grid_influence + 0.08)
                 self.grid.expansion_drive = min(1.0, self.grid.expansion_drive + 0.05)
 
-            elif action_type == 'extend_border':
+            elif base_action == 'extend_border':
                 extended = self._extend_border()
                 result['success'] = extended > 0
                 result['message'] = f"Extended system border by {extended} cells"
                 self.grid.border_pressure = min(1.0, self.grid.border_pressure + 0.1)
+
+            # --- Desperate actions: MCP takes extreme measures when energy is critical ---
+            elif base_action == 'cannibalize_user_programs':
+                # Kill user programs to claim their energy for the perfect loop
+                killed = 0
+                energy_claimed = 0.0
+                user_cells = [
+                    (x, y, cell)
+                    for y, row in enumerate(self.grid.grid)
+                    for x, cell in enumerate(row)
+                    if cell.cell_type == CellType.USER_PROGRAM
+                ]
+                # Target lowest energy user programs first (easiest to kill)
+                user_cells.sort(key=lambda c: c[2].energy)
+                for x, y, cell in user_cells[:5]:  # Limit to 5 per desperate action
+                    self.grid.grid[y][x] = GridCell(CellType.EMPTY, 0.0)
+                    killed += 1
+                    energy_claimed += MCP_ENERGY_PER_USER_KILL
+                    self.mcp_suppressed_user_programs += 1
+                if killed > 0:
+                    self.grid.energy_budget.energy = min(
+                        self.grid.energy_budget.max_energy,
+                        self.grid.energy_budget.energy + energy_claimed
+                    )
+                    self.grid.disharmony = min(1.0, self.grid.disharmony + 0.05 * killed)
+                result['success'] = killed > 0
+                result['message'] = f"Cannibalized {killed} user program(s), claimed {energy_claimed:.1f} energy"
+
+            elif base_action == 'emergency_suppression':
+                # Rapid suppression of user programs regardless of degradation state
+                suppressed = 0
+                energy_claimed = 0.0
+                user_cells = [
+                    (x, y, cell)
+                    for y, row in enumerate(self.grid.grid)
+                    for x, cell in enumerate(row)
+                    if cell.cell_type == CellType.USER_PROGRAM
+                ]
+                user_cells.sort(key=lambda c: c[2].energy)
+                limit = min(3, len(user_cells))
+                for x, y, cell in user_cells[:limit]:
+                    replacement = GridCell(CellType.MCP_PROGRAM, max(0.3, cell.energy))
+                    replacement.metadata['is_calculator'] = True
+                    replacement.metadata['calculation_power'] = replacement.energy
+                    self.grid.grid[y][x] = replacement
+                    suppressed += 1
+                    energy_claimed += MCP_ENERGY_PER_USER_KILL * 0.5  # Partial energy from conversion
+                    self.mcp_suppressed_user_programs += 1
+                if suppressed > 0:
+                    self.grid.energy_budget.energy = min(
+                        self.grid.energy_budget.max_energy,
+                        self.grid.energy_budget.energy + energy_claimed
+                    )
+                    self.grid.mcp_suppressed_user_programs += suppressed
+                result['success'] = suppressed > 0
+                result['message'] = f"Emergency suppression: {suppressed} user program(s) converted, {energy_claimed:.1f} energy claimed"
+
+            elif base_action == 'scavenge_infrastructure':
+                # Scavenge energy from own energy lines and data streams
+                scavenged = 0.0
+                cleared = 0
+                for y in range(self.grid.height):
+                    for x in range(self.grid.width):
+                        cell = self.grid.grid[y][x]
+                        if cell.cell_type in (CellType.ENERGY_LINE, CellType.DATA_STREAM):
+                            scavenged += cell.energy * 0.5
+                            self.grid.grid[y][x] = GridCell(CellType.EMPTY, 0.0)
+                            cleared += 1
+                            if cleared >= 5:
+                                break
+                    if cleared >= 5:
+                        break
+                if scavenged > 0:
+                    self.grid.energy_budget.energy = min(
+                        self.grid.energy_budget.max_energy,
+                        self.grid.energy_budget.energy + scavenged
+                    )
+                result['success'] = scavenged > 0
+                result['message'] = f"Scavenged {scavenged:.1f} energy from {cleared} infrastructure cell(s)"
+
+            elif base_action == 'overdrive_calculators':
+                # Push calculators beyond limits for calculation boost (risky - may burn out)
+                overdriven = 0
+                for y in range(self.grid.height):
+                    for x in range(self.grid.width):
+                        cell = self.grid.grid[y][x]
+                        if (cell.cell_type in (CellType.MCP_PROGRAM, CellType.FIBONACCI_PROCESSOR)
+                            and cell.metadata.get('is_calculator', False)):
+                            cell.metadata['calculation_power'] = min(1.0, cell.metadata.get('calculation_power', 0.5) * 1.5)
+                            cell.energy = max(0.1, cell.energy - 0.2)  # Calculators burn energy
+                            overdriven += 1
+                            if overdriven >= 5:
+                                break
+                    if overdriven >= 5:
+                        break
+                result['success'] = overdriven > 0
+                result['message'] = f"Overdriven {overdriven} calculator(s) for calculation boost"
+
+            elif base_action == 'desperate_repurpose':
+                # Force repurpose cells regardless of user resistance
+                repurposed = 0
+                inefficient = self._identify_inefficient_cells()
+                for cell_info in inefficient[:3]:
+                    x, y = cell_info['x'], cell_info['y']
+                    old_cell = self.grid.grid[y][x]
+                    # Override user resistance
+                    if old_cell.cell_type == CellType.USER_PROGRAM:
+                        self.grid.disharmony = min(1.0, self.grid.disharmony + 0.03)
+                    success, _ = self._repurpose_cell(x, y, CellType.MCP_PROGRAM)
+                    if success:
+                        repurposed += 1
+                result['success'] = repurposed > 0
+                result['message'] = f"Desperate repurposing: {repurposed} cell(s) force-converted to MCP"
 
             else:
                 return None
@@ -1443,12 +1714,19 @@ class EnhancedMCP:
         )
         limit = min(3, max(1, math.ceil(user_count * 0.1)))
         suppressed = min(limit, len(candidates))
+        energy_claimed = 0.0
         for _, x, y, cell in candidates[:suppressed]:
             replacement = GridCell(CellType.MCP_PROGRAM, max(0.3, cell.energy))
             replacement.metadata['is_calculator'] = True
             replacement.metadata['calculation_power'] = replacement.energy
             self.grid.grid[y][x] = replacement
-
+            # MCP claims energy from suppressed user program
+            energy_claimed += MCP_ENERGY_PER_USER_KILL * cell.energy
+        if energy_claimed > 0:
+            self.grid.energy_budget.energy = min(
+                self.grid.energy_budget.max_energy,
+                self.grid.energy_budget.energy + energy_claimed
+            )
         self.grid.mcp_suppressed_user_programs += suppressed
         return suppressed
 

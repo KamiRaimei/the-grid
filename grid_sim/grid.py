@@ -18,6 +18,8 @@ from .cells import (
     NUMPY_AVAILABLE,
     MCP_ACTION_ENERGY_COSTS,
     MCP_COMMAND_ENERGY_COSTS,
+    MCP_ENERGY_PER_USER_KILL,
+    USER_ENERGY_PER_MCP_KILL,
 )
 from .fibonacci import GridFibonacciCalculator
 from .personality import UserProgramPersonality
@@ -403,7 +405,7 @@ class TRONGrid:
                             # REVOLT SUCCESSFUL: Convert MCP program to user program
                             new_grid[ty][tx] = GridCell(
                                 CellType.USER_PROGRAM,
-                                min(0.8, cell.energy * 0.8),
+                                min(1.0, cell.energy * 0.8 + USER_ENERGY_PER_MCP_KILL),
                                 personality=personality.mutate(),
                             )
                             reserved_user_cells.add((tx, ty))
@@ -412,7 +414,8 @@ class TRONGrid:
                             # Successful revolt generates disharmony and weakens MCP
                             self.disharmony = min(1.0, self.disharmony + 0.03)
                             self.stats['mcp_control'] = max(0.0, self.stats['mcp_control'] - 0.02)
-                            # Reduce MCP energy as "loss of control"
+                            # User claims energy from killed MCP program (personal energy boost)
+                            # MCP loses energy from global budget (loss of control)
                             self.energy_budget.energy = max(0.0, self.energy_budget.energy - 2.0)
                             continue
 
@@ -443,6 +446,42 @@ class TRONGrid:
                                     metadata=target_cell.metadata.copy()
                                 )
                             personality.energy = max(0.1, personality.energy - 0.05)  # Cost of sabotage
+
+                    # --- ASSASSINATE: User programs kill MCP programs to claim energy ---
+                    # High-rebellion users can assassinate nearby MCP programs for survival energy
+                    if personality.rebellion > 0.8 and random.random() < 0.08:
+                        mcp_targets = [
+                            (x + dx, y + dy)
+                            for dx, dy in self.neighbor_offsets_8
+                            if 0 <= x + dx < self.width and 0 <= y + dy < self.height
+                            and self.grid[y + dy][x + dx].cell_type == CellType.MCP_PROGRAM
+                        ]
+                        if mcp_targets:
+                            tx, ty = random.choice(mcp_targets)
+                            target_cell = self.grid[ty][tx]
+                            # Assassination success depends on rebellion vs MCP stability
+                            assassination_chance = (
+                                0.3 + personality.rebellion * 0.4 -
+                                self.stats['stability'] * 0.2 +
+                                personality.underground_network * 0.2
+                            )
+                            if random.random() < assassination_chance:
+                                # SUCCESSFUL ASSASSINATION: Kill MCP program, claim energy
+                                energy_claimed = USER_ENERGY_PER_MCP_KILL * target_cell.energy
+                                self.grid[ty][tx] = GridCell(CellType.EMPTY, 0.0)
+                                # User gains energy from the kill
+                                personality.energy = min(1.0, personality.energy + energy_claimed * 0.3)
+                                cell.energy = min(1.0, cell.energy + energy_claimed * 0.3)
+                                self.energy_budget.energy = max(
+                                    0.0, self.energy_budget.energy - energy_claimed
+                                )
+                                self.disharmony = min(1.0, self.disharmony + 0.05)
+                                continue
+                            else:
+                                # Failed assassination: user takes damage
+                                personality.energy = max(0.1, personality.energy - 0.1)
+                                cell.energy = max(0.1, cell.energy - 0.1)
+                                self.disharmony = min(1.0, self.disharmony + 0.02)
 
                     # --- Multiplication: User programs multiply under oppression ---
                     if random.random() < multiplication_chance:

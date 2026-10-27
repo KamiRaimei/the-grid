@@ -299,6 +299,130 @@ class MCPLearningSystem:
         actions, probs = zip(*probabilities.items())
         return random.choices(actions, weights=probs, k=1)[0]
 
+    def mutate_action(self, action: str, reward: float, generation: int) -> str:
+        """Mutate an action based on reward and generation.
+
+        Actions can evolve over time - successful actions spawn variants,
+        failed actions are penalized and may be replaced with new variants.
+        This simulates the MCP's ability to develop new strategies.
+        """
+        action_lower = action.lower()
+
+        # Determine mutation probability based on reward
+        if reward > 0.3:
+            # Successful action: moderate chance to create a beneficial variant
+            mutation_chance = 0.4 * self.personality_traits['innovation_bias']
+        elif reward < -0.3:
+            # Failed action: high chance to mutate away from it
+            mutation_chance = 0.6 * (1.0 - self.personality_traits['conservatism'])
+        else:
+            # Neutral: moderate mutation chance to encourage exploration under pressure
+            mutation_chance = 0.25
+
+        # Under critical energy (low generation = early struggle), increase mutation
+        if generation < 50:
+            mutation_chance *= 1.5
+
+        if random.random() > mutation_chance:
+            return action  # No mutation
+
+        # Generate a mutated variant of the action
+        variants = self._generate_action_variants(action)
+        if not variants:
+            return action
+
+        # Select a variant weighted by generation (newer generations favor innovation)
+        generation_bias = min(1.0, generation / 50.0)
+        if random.random() < 0.5 + generation_bias * 0.4:
+            # Prefer innovative variants
+            return random.choice(variants)
+        else:
+            return action
+
+    def _generate_action_variants(self, action: str) -> list:
+        """Generate variant actions based on the base action type."""
+        variants = []
+        action_lower = action.lower()
+
+        # Desperate action variants
+        if 'cannibalize' in action_lower:
+            variants.extend([
+                'cannibalize_user_programs_aggressive',
+                'cannibalize_user_programs_selective',
+                'harvest_user_energy',
+            ])
+        elif 'emergency_suppression' in action_lower:
+            variants.extend([
+                'rapid_suppression',
+                'mass_conversion',
+                'purge_user_programs',
+            ])
+        elif 'scavenge' in action_lower:
+            variants.extend([
+                'scavenge_energy_lines',
+                'scavenge_data_streams',
+                'drain_infrastructure',
+            ])
+        elif 'overdrive' in action_lower:
+            variants.extend([
+                'overdrive_calculators_extreme',
+                'push_calculation_limits',
+                'overclock_processors',
+            ])
+        elif 'desperate_repurpose' in action_lower:
+            variants.extend([
+                'force_repurpose_cells',
+                'convert_all_inefficient',
+                'repurpose_with_resistance',
+            ])
+        # Standard action variants
+        elif 'optimize' in action_lower:
+            variants.extend([
+                'optimize_calculation_loop_aggressive',
+                'optimize_calculation_loop_conservative',
+                'hyper_optimize_loop',
+            ])
+        elif 'deploy' in action_lower:
+            variants.extend([
+                'deploy_fibonacci_processors_mass',
+                'deploy_calculators_strategic',
+                'spawn_processor_cluster',
+            ])
+        elif 'suppress' in action_lower:
+            variants.extend([
+                'suppress_user_programs_harsh',
+                'suppress_user_programs_selective',
+                'eliminate_user_resistance',
+            ])
+        elif 'quarantine' in action_lower:
+            variants.extend([
+                'quarantine_grid_bugs_total',
+                'contain_bug_outbreak_extreme',
+                'isolate_all_bugs',
+            ])
+        elif 'maintain' in action_lower:
+            variants.extend([
+                'maintain_energy_grid_aggressive',
+                'maintain_energy_grid_efficient',
+                'overproduce_energy',
+            ])
+
+        return variants
+
+    def record_action_mutation(self, original_action: str, mutated_action: str, reward: float):
+        """Record an action mutation for tracking and analysis."""
+        if not hasattr(self, 'action_mutations'):
+            self.action_mutations = []
+        self.action_mutations.append({
+            'timestamp': datetime.now().isoformat(),
+            'original': original_action,
+            'mutated': mutated_action,
+            'reward': reward,
+            'training_step': self.training_steps,
+        })
+        if len(self.action_mutations) > 200:
+            self.action_mutations = self.action_mutations[-200:]
+
     def get_decision_modifier(self, trait_name, base_value=1.0):
         """Adjust a base decision probability according to a learned trait."""
         trait_names = {

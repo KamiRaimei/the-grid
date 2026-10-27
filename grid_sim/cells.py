@@ -98,6 +98,22 @@ MCP_COMMAND_ENERGY_COSTS = {
     'GOD_REVEAL': 10.0,
 }
 
+# ==================== DESPERATE MCP ACTIONS (Critical Energy) ====================
+# Low-cost, high-risk actions MCP can take when energy is critical
+MCP_DESPERATE_ACTION_ENERGY_COSTS = {
+    'cannibalize_user_programs': 2.0,      # Kill user programs to claim their energy
+    'emergency_suppression': 3.0,          # Rapid suppression of user programs
+    'scavenge_infrastructure': 1.0,        # Scavenge energy from own infrastructure
+    'overdrive_calculators': 4.0,          # Push calculators beyond limits (risky)
+    'desperate_repurpose': 2.0,            # Force repurpose cells regardless of resistance
+}
+
+# Energy gained when MCP kills a user program (per program)
+MCP_ENERGY_PER_USER_KILL = 3.0
+
+# Energy gained when User kills an MCP program (per program)
+USER_ENERGY_PER_MCP_KILL = 2.0
+
 # PERSONALITY FILE
 PERSONALITY_FILE = "mcp_personality.json"
 
