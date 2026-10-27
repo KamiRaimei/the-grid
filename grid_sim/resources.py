@@ -353,21 +353,13 @@ class GlobalEnergyBudget:
         return self.energy_ratio() < self.config.critical_threshold
 
     def action_cost_multiplier(self) -> float:
-        """Return a multiplier (>=1.0) applied to MCP action costs when scarce.
+        """Return the action cost multiplier.
 
-        The scarcer the energy, the more expensive actions become, forcing
-        MCP to prioritize only the most critical actions.
+        Always returns 1.0 — no energy cost penalty. MCP actions cost the same
+        regardless of energy level, so MCP is never artificially restricted by
+        scarcity-based cost inflation.
         """
-        ratio = self.energy_ratio()
-        if ratio >= self.config.scarcity_threshold:
-            return 1.0
-        if ratio <= self.config.critical_threshold:
-            return 5.0  # Critical: actions cost 5x
-        # Linear interpolation between 1.0 and 5.0
-        t = (self.config.scarcity_threshold - ratio) / (
-            self.config.scarcity_threshold - self.config.critical_threshold
-        )
-        return 1.0 + 4.0 * t
+        return 1.0
 
     def affordable_actions(self, action_costs: Dict[str, float]) -> Dict[str, float]:
         """Filter action costs to only those affordable, applying scarcity multiplier."""
@@ -444,6 +436,42 @@ class GlobalEnergyBudget:
     def advance_tick(self) -> None:
         """Advance the internal tick counter."""
         self._tick += 1
+
+    def adjust_max_energy_from_hardware(self, hardware: HardwareResourceCounter) -> None:
+        """Dynamically adjust max_energy based on available host hardware.
+
+        Available RAM and CPU headroom determine the energy ceiling:
+        - More available RAM → higher max_energy (more memory to sustain the grid)
+        - More available CPU → higher max_energy (more compute to generate energy)
+        - High host pressure → lower max_energy (resources constrained)
+
+        The base max_energy is scaled by a hardware factor (0.5x to 2.0x).
+        """
+        snapshot = hardware.snapshot()
+        mem_percent = snapshot['memory_percent']
+        cpu_percent = snapshot['cpu_percent']
+        load_avg = snapshot['load_avg_1m']
+        cpu_count = snapshot['cpu_count']
+
+        # Available RAM fraction (inverse of usage)
+        ram_available = max(0.0, 1.0 - mem_percent / 100.0)
+
+        # Available CPU fraction (inverse of usage + load pressure)
+        cpu_load_pressure = min(1.0, load_avg / max(1, cpu_count))
+        cpu_available = max(0.0, 1.0 - cpu_percent / 100.0 - cpu_load_pressure * 0.5)
+
+        # Combined hardware factor: 0.5 (very constrained) to 2.0 (abundant)
+        hw_factor = 0.5 + ram_available * 0.75 + cpu_available * 0.75
+        hw_factor = max(0.5, min(2.0, hw_factor))
+
+        # New max_energy = base max * hardware factor
+        new_max = self.config.max_energy * hw_factor
+
+        # If energy exceeds new max, clamp it
+        if self.energy > new_max:
+            self.energy = new_max
+
+        self.max_energy = new_max
 
     def snapshot(self) -> Dict[str, Any]:
         """Return a snapshot of the energy budget state."""
