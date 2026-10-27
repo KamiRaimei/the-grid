@@ -30,7 +30,7 @@ pip install .
 Run the simulation:
 
 ```
-python -m grid_sim --no-curses
+python -m grid_sim
 ```
 
 Options:
