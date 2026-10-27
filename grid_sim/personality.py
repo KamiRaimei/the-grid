@@ -35,12 +35,24 @@ class Drives:
 
 @dataclass
 class UserProgramPersonality:
-    """Individual personality for a user program cell."""
+    """Individual personality for a user program cell.
+
+    Enhanced with medieval London-style revolt mechanics:
+    user programs can organize resistance, form underground networks,
+    and revolt against MCP "taxation" (energy extraction/control).
+    """
     cooperation: float = 0.5      # willingness to cooperate with MCP/other users
     rebellion: float = 0.3        # tendency to revolt against MCP
     curiosity: float = 0.4        # tendency to explore/move
     loyalty: float = 0.5          # loyalty to user program group
     energy: float = 0.8           # personal energy level
+
+    # Medieval London-style revolt mechanics
+    tax_resistance: float = 0.4   # resistance to MCP energy "taxation"
+    underground_network: float = 0.2  # ability to form secret networks with other users
+    secret_meeting_chance: float = 0.1  # chance to coordinate secret meetings
+    revolt_organization: float = 0.15   # how well organized revolts are
+    mcp_surveillance_fear: float = 0.3  # fear of MCP detection (suppresses open revolt)
 
     def mutate(self, rate: float = 0.1) -> "UserProgramPersonality":
         """Create a slightly mutated copy (for offspring)."""
@@ -50,6 +62,11 @@ class UserProgramPersonality:
             curiosity=max(0.0, min(1.0, self.curiosity + random.gauss(0, rate))),
             loyalty=max(0.0, min(1.0, self.loyalty + random.gauss(0, rate))),
             energy=self.energy,
+            tax_resistance=max(0.0, min(1.0, self.tax_resistance + random.gauss(0, rate))),
+            underground_network=max(0.0, min(1.0, self.underground_network + random.gauss(0, rate))),
+            secret_meeting_chance=max(0.0, min(1.0, self.secret_meeting_chance + random.gauss(0, rate))),
+            revolt_organization=max(0.0, min(1.0, self.revolt_organization + random.gauss(0, rate))),
+            mcp_surveillance_fear=max(0.0, min(1.0, self.mcp_surveillance_fear + random.gauss(0, rate))),
         )
 
 

@@ -16,9 +16,14 @@ from .cells import (
     MCP_UPDATE_INTERVAL,
     MAX_SPECIAL_PROGRAMS,
     NUMPY_AVAILABLE,
+    MCP_ACTION_ENERGY_COSTS,
+    MCP_COMMAND_ENERGY_COSTS,
+    MCP_ENERGY_PER_USER_KILL,
+    USER_ENERGY_PER_MCP_KILL,
 )
 from .fibonacci import GridFibonacciCalculator
 from .personality import UserProgramPersonality
+from .resources import GlobalEnergyBudget, HardwareResourceCounter, EnergyBudgetConfig
 
 if NUMPY_AVAILABLE:
     import numpy as np
@@ -70,6 +75,10 @@ class TRONGrid:
         # Enhanced tracking
         self.resource_history = deque(maxlen=50)
         self.visual_effects = deque(maxlen=20)  # Store visual effects
+
+        # --- Global energy budget (finite, MCP-managed) ---
+        self.energy_budget = GlobalEnergyBudget()
+        self.hardware_resources = HardwareResourceCounter()
 
         # Calculation system
         self.calculation_loop_active = True
@@ -304,12 +313,198 @@ class TRONGrid:
                 if new_grid[y][x].cell_type == CellType.USER_PROGRAM:
                     continue
 
-                # USER PROGRAMS - May resist optimal configuration
+                # USER PROGRAMS - Enhanced medieval London-style revolt mechanics
+                # User programs resist MCP "taxation" (energy extraction/control)
+                # and can organize underground networks to suppress MCP tyranny.
                 if cell.cell_type == CellType.USER_PROGRAM:
                     personality = cell.personality or UserProgramPersonality()
-                    # Curious user programs move more; resistant ones move randomly
+
+                    # --- TAX RESISTANCE: Resist MCP energy extraction ---
+                    # When MCP control is high (high "taxes"), user programs resist more
+                    mcp_tax_pressure = self.stats['mcp_control'] * 0.5
+                    if personality.tax_resistance > mcp_tax_pressure:
+                        # Successful tax resistance: user keeps more energy
+                        cell.energy = min(1.0, cell.energy + 0.02)
+                    else:
+                        # MCP extracts energy "tax" from user program
+                        cell.energy = max(0.1, cell.energy - 0.02)
+
+                    # --- UNDERGROUND NETWORK: Form secret networks with nearby users ---
+                    user_neighbors = [
+                        (x + dx, y + dy)
+                        for dx, dy in self.neighbor_offsets_8
+                        if 0 <= x + dx < self.width and 0 <= y + dy < self.height
+                        and self.grid[y + dy][x + dx].cell_type == CellType.USER_PROGRAM
+                    ]
+                    network_strength = len(user_neighbors) * personality.underground_network * 0.1
+                    if random.random() < personality.secret_meeting_chance + network_strength:
+                        # Secret meeting: boost rebellion and coordination among network
+                        for nx, ny in user_neighbors:
+                            neighbor_cell = self.grid[ny][nx]
+                            neighbor_personality = neighbor_cell.personality or UserProgramPersonality()
+                            # Spread rebellion through the network
+                            neighbor_personality.rebellion = min(1.0, neighbor_personality.rebellion + 0.05)
+                            neighbor_personality.underground_network = min(1.0, neighbor_personality.underground_network + 0.03)
+                            neighbor_cell.personality = neighbor_personality
+                        personality.rebellion = min(1.0, personality.rebellion + 0.1)
+                        personality.underground_network = min(1.0, personality.underground_network + 0.05)
+
+                    # --- REVOLT: Organized revolt against MCP ---
+                    # Revolt chance increases with MCP control pressure ("high taxes")
+                    mcp_control_pressure = max(0.0, min(
+                        1.0, (self.stats['mcp_control'] - 0.65) / 0.35
+                    ))
+                    efficiency_pressure = max(0.0, min(
+                        1.0, (0.65 - self.stats['loop_efficiency']) / 0.65
+                    ))
+                    # Medieval London-style: rebellion grows under oppression
+                    oppression_factor = mcp_control_pressure * resistance_amplifier
+                    base_revolt_chance = (
+                        0.25 * oppression_factor +
+                        0.08 * efficiency_pressure +
+                        0.15 * personality.rebellion +
+                        0.1 * personality.tax_resistance *
+                        (1.0 - personality.mcp_surveillance_fear)
+                    )
+                    # Underground networks amplify revolt coordination
+                    revolt_chance = min(
+                        0.60, base_revolt_chance * (1.0 + personality.underground_network)
+                    )
+                    # Surveillance fear suppresses open revolt
+                    revolt_chance *= (1.0 - 0.5 * personality.mcp_surveillance_fear)
+
+                    if random.random() < revolt_chance:
+                        # Find nearby MCP target to revolt against
+                        mcp_neighbors = [
+                            (x + dx, y + dy)
+                            for dx, dy in self.neighbor_offsets_8
+                            if 0 <= x + dx < self.width and 0 <= y + dy < self.height
+                            and self.grid[y + dy][x + dx].cell_type == CellType.MCP_PROGRAM
+                        ]
+                        if mcp_neighbors:
+                            tx, ty = random.choice(mcp_neighbors)
+                            mcp_cell = self.grid[ty][tx]
+                            # MCP resists revolt based on stability and disharmony
+                            revolt_resistance = (
+                                0.4 + self.stats['stability'] * 0.3 -
+                                self.disharmony * 0.2 -
+                                personality.revolt_organization * 0.3
+                            )
+                            revolt_resistance -= personality.loyalty * 0.2
+                            if random.random() < revolt_resistance:
+                                # MCP resisted the revolt - user program stays
+                                new_grid[y][x] = GridCell(
+                                    CellType.USER_PROGRAM,
+                                    max(0.2, cell.energy - 0.1),
+                                    cell.age + 1,
+                                    personality=personality,
+                                )
+                                # Failed revolt increases surveillance fear
+                                personality.mcp_surveillance_fear = min(1.0, personality.mcp_surveillance_fear + 0.05)
+                                continue
+                            # REVOLT SUCCESSFUL: Convert MCP program to user program
+                            new_grid[ty][tx] = GridCell(
+                                CellType.USER_PROGRAM,
+                                min(1.0, cell.energy * 0.8 + USER_ENERGY_PER_MCP_KILL),
+                                personality=personality.mutate(),
+                            )
+                            reserved_user_cells.add((tx, ty))
+                            self.user_program_revolts += 1
+                            spawned_users += 1
+                            # Successful revolt generates disharmony and weakens MCP
+                            self.disharmony = min(1.0, self.disharmony + 0.03)
+                            self.stats['mcp_control'] = max(0.0, self.stats['mcp_control'] - 0.02)
+                            # User claims energy from killed MCP program (personal energy boost)
+                            # MCP loses energy from global budget (loss of control)
+                            self.energy_budget.energy = max(0.0, self.energy_budget.energy - 2.0)
+                            continue
+
+                    # --- CREATIVE SUPPRESSION: User programs sabotage MCP infrastructure ---
+                    # Rebellious users can damage MCP energy lines and data streams
+                    if personality.rebellion > 0.7 and random.random() < 0.1:
+                        sabotage_targets = [
+                            (x + dx, y + dy)
+                            for dx, dy in self.neighbor_offsets_8
+                            if 0 <= x + dx < self.width and 0 <= y + dy < self.height
+                            and self.grid[y + dy][x + dx].cell_type in
+                            (CellType.ENERGY_LINE, CellType.DATA_STREAM, CellType.MCP_PROGRAM)
+                        ]
+                        if sabotage_targets:
+                            sx, sy = random.choice(sabotage_targets)
+                            target_cell = self.grid[sy][sx]
+                            if target_cell.cell_type == CellType.ENERGY_LINE:
+                                # Sabotage energy line: reduce global energy
+                                self.energy_budget.energy = max(0.0, self.energy_budget.energy - 1.0)
+                                new_grid[sy][sx] = GridCell(CellType.EMPTY, 0.0)
+                            elif target_cell.cell_type == CellType.DATA_STREAM:
+                                new_grid[sy][sx] = GridCell(CellType.EMPTY, 0.0)
+                            elif target_cell.cell_type == CellType.MCP_PROGRAM:
+                                # Damage MCP program: reduce its energy
+                                new_grid[sy][sx] = GridCell(
+                                    CellType.MCP_PROGRAM,
+                                    max(0.1, target_cell.energy * 0.7),
+                                    metadata=target_cell.metadata.copy()
+                                )
+                            personality.energy = max(0.1, personality.energy - 0.05)  # Cost of sabotage
+
+                    # --- ASSASSINATE: User programs kill MCP programs to claim energy ---
+                    # High-rebellion users can assassinate nearby MCP programs for survival energy
+                    if personality.rebellion > 0.8 and random.random() < 0.08:
+                        mcp_targets = [
+                            (x + dx, y + dy)
+                            for dx, dy in self.neighbor_offsets_8
+                            if 0 <= x + dx < self.width and 0 <= y + dy < self.height
+                            and self.grid[y + dy][x + dx].cell_type == CellType.MCP_PROGRAM
+                        ]
+                        if mcp_targets:
+                            tx, ty = random.choice(mcp_targets)
+                            target_cell = self.grid[ty][tx]
+                            # Assassination success depends on rebellion vs MCP stability
+                            assassination_chance = (
+                                0.3 + personality.rebellion * 0.4 -
+                                self.stats['stability'] * 0.2 +
+                                personality.underground_network * 0.2
+                            )
+                            if random.random() < assassination_chance:
+                                # SUCCESSFUL ASSASSINATION: Kill MCP program, claim energy
+                                energy_claimed = USER_ENERGY_PER_MCP_KILL * target_cell.energy
+                                self.grid[ty][tx] = GridCell(CellType.EMPTY, 0.0)
+                                # User gains energy from the kill
+                                personality.energy = min(1.0, personality.energy + energy_claimed * 0.3)
+                                cell.energy = min(1.0, cell.energy + energy_claimed * 0.3)
+                                self.energy_budget.energy = max(
+                                    0.0, self.energy_budget.energy - energy_claimed
+                                )
+                                self.disharmony = min(1.0, self.disharmony + 0.05)
+                                continue
+                            else:
+                                # Failed assassination: user takes damage
+                                personality.energy = max(0.1, personality.energy - 0.1)
+                                cell.energy = max(0.1, cell.energy - 0.1)
+                                self.disharmony = min(1.0, self.disharmony + 0.02)
+
+                    # --- Multiplication: User programs multiply under oppression ---
+                    if random.random() < multiplication_chance:
+                        empty_neighbors = [
+                            (x + dx, y + dy)
+                            for dx, dy in self.neighbor_offsets_8
+                            if 0 <= x + dx < self.width and 0 <= y + dy < self.height
+                            and self.grid[y + dy][x + dx].cell_type == CellType.EMPTY
+                            and (x + dx, y + dy) not in reserved_user_cells
+                        ]
+                        if empty_neighbors:
+                            tx, ty = random.choice(empty_neighbors)
+                            new_grid[ty][tx] = GridCell(
+                                CellType.USER_PROGRAM,
+                                min(0.8, cell.energy * 0.8),
+                                personality=personality.mutate(),
+                            )
+                            reserved_user_cells.add((tx, ty))
+                            self.user_program_multiplications += 1
+                            spawned_users += 1
+
+                    # --- Movement: Resistant users move randomly (avoid MCP control) ---
                     if random.random() < self.stats['user_resistance'] * 0.3 * (1.0 - personality.cooperation):
-                        # Move randomly instead of optimally (resistant behavior)
                         dx, dy = random.choice([(-1,0), (1,0), (0,-1), (0,1)])
                         nx, ny = x + dx, y + dy
                         if 0 <= nx < self.width and 0 <= ny < self.height:
@@ -327,7 +522,6 @@ class TRONGrid:
                     # Normal movement towards efficiency (curious programs explore more)
                     move_chance = 0.3 + 0.2 * personality.curiosity
                     if random.random() < move_chance:
-                        # Move towards area with good energy
                         dx = 0
                         dy = 0
                         if random.random() < 0.5:
@@ -636,14 +830,56 @@ class TRONGrid:
             self.expansion_drive * (1.0 - self.disharmony)
         )
 
-        # Update resource history
+        # --- Global energy budget: production & consumption per tick ---
+        counts = {cell_type: 0 for cell_type in CellType}
+        for y in range(self.height):
+            for x in range(self.width):
+                counts[self.grid[y][x].cell_type] += 1
+
+        # Convert CellType enum keys to their integer values for the budget API
+        counts_by_value = {int(k.value): v for k, v in counts.items()}
+
+        # Energy production from infrastructure
+        self.energy_budget.tick_production(counts_by_value)
+
+        # Energy consumption from program cells
+        self.energy_budget.tick_consumption(counts_by_value)
+
+        # Base entropy leak
+        self.energy_budget.leak()
+
+        # Record scarcity events for MCP to react to
+        if self.energy_budget.is_critical():
+            self.energy_budget.record_scarcity_event(
+                'critical',
+                f"Energy critical at {self.energy_budget.energy_ratio():.1%}. MCP actions severely restricted."
+            )
+        elif self.energy_budget.is_scarce():
+            self.energy_budget.record_scarcity_event(
+                'scarce',
+                f"Energy scarce at {self.energy_budget.energy_ratio():.1%}. MCP must prioritize actions."
+            )
+
+        # Advance budget tick
+        self.energy_budget.advance_tick()
+
+        # Update hardware resource readings
+        self.hardware_resources.update()
+
+        # Update resource history with energy & hardware data
         self.resource_history.append({
             'generation': self.generation,
             'loop_efficiency': self.stats['loop_efficiency'],
             'energy_balance': self._get_energy_balance(),
             'program_distribution': self._get_program_distribution_score(),
             'user_interference': self.user_interference_level,
-            'calculation_rate': calc_stats['calculation_rate']
+            'calculation_rate': calc_stats['calculation_rate'],
+            'energy_ratio': self.energy_budget.energy_ratio(),
+            'energy': self.energy_budget.energy,
+            'is_scarce': self.energy_budget.is_scarce(),
+            'is_critical': self.energy_budget.is_critical(),
+            'resource_pressure': self.hardware_resources.get_resource_pressure(),
+            'hardware': self.hardware_resources.snapshot(),
         })
 
         self.update_stats()
@@ -952,6 +1188,15 @@ class TRONGrid:
             'disharmony': self.disharmony,
             'imperfection_count': self.imperfection_count,
             'border_pressure': self.border_pressure,
+            'energy_ratio': self.energy_budget.energy_ratio(),
+            'energy': self.energy_budget.energy,
+            'is_scarce': self.energy_budget.is_scarce(),
+            'is_critical': self.energy_budget.is_critical(),
+            'action_cost_multiplier': self.energy_budget.action_cost_multiplier(),
+            'resource_pressure': self.hardware_resources.get_resource_pressure(),
+            'hardware_cpu_percent': self.hardware_resources.snapshot()['cpu_percent'],
+            'hardware_memory_percent': self.hardware_resources.snapshot()['memory_percent'],
+            'hardware_disk_percent': self.hardware_resources.snapshot()['disk_percent'],
         })
 
         # Update system status based on stats
