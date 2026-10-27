@@ -97,6 +97,8 @@ class GridCell:
     animation_frame: int = 0
     processing: bool = False
     calculation_contribution: float = 0.0
+    # Organic personality for user programs (None for non-user cells)
+    personality: Optional[Dict[str, float]] = None
 
     def __post_init__(self):
         if self.metadata is None:
