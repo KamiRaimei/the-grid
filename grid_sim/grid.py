@@ -866,6 +866,9 @@ class TRONGrid:
         # Update hardware resource readings
         self.hardware_resources.update()
 
+        # Dynamically adjust max_energy based on available host hardware
+        self.energy_budget.adjust_max_energy_from_hardware(self.hardware_resources)
+
         # Update resource history with energy & hardware data
         self.resource_history.append({
             'generation': self.generation,

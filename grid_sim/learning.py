@@ -375,6 +375,12 @@ class MCPLearningSystem:
                 'convert_all_inefficient',
                 'repurpose_with_resistance',
             ])
+        elif 'harvest_energy' in action_lower:
+            variants.extend([
+                'harvest_energy_from_users',
+                'harvest_energy_from_mcp',
+                'drain_all_programs',
+            ])
         # Standard action variants
         elif 'optimize' in action_lower:
             variants.extend([
