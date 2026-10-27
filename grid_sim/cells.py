@@ -50,6 +50,54 @@ MCP_UPDATE_INTERVAL = 5  # seconds (controls MCP AUTONOMOUS action rate)
 MAX_SPECIAL_PROGRAMS = 10
 SPECIAL_PROGRAM_TYPES = ["SCANNER", "DEFENDER", "REPAIR", "SABOTEUR", "RECONFIGURATOR", "ENERGY_HARVESTER", "FIBONACCI_CALCULATOR"]
 
+# ==================== MCP ACTION ENERGY COSTS ====================
+# Energy cost for each MCP autonomous action (drawn from global energy budget)
+MCP_ACTION_ENERGY_COSTS = {
+    'optimize_calculation_loop': 5.0,
+    'deploy_fibonacci_processors': 10.0,
+    'quarantine_grid_bugs': 3.0,
+    'contain_bug_outbreak': 5.0,
+    'stabilize_system': 4.0,
+    'boost_calculation_rate': 6.0,
+    'add_calculation_infrastructure': 8.0,
+    'optimize_fibonacci_calculation': 5.0,
+    'improve_cell_connectivity': 4.0,
+    'add_data_streams': 3.0,
+    'enhance_collaboration': 3.0,
+    'inefficiency_cleanup': 4.0,
+    'cell_repurposing': 5.0,
+    'optimize_cell_efficiency': 6.0,
+    'maintain_energy_grid': 4.0,
+    'optimize_resource_distribution': 5.0,
+    'balance_system_load': 4.0,
+    'suppress_user_programs': 8.0,
+    # Expansion actions (expensive - project beyond grid)
+    'expand_beyond_grid': 15.0,
+    'project_influence': 12.0,
+    'extend_border': 10.0,
+}
+
+# Energy cost for MCP command-driven actions
+MCP_COMMAND_ENERGY_COSTS = {
+    'ADD_PROGRAM': 3.0,
+    'DELETE_CELL': 2.0,
+    'REPURPOSE_CELL': 4.0,
+    'OPTIMIZE_CELLS': 6.0,
+    'BOOST_ENERGY': 5.0,
+    'REPAIR_SYSTEM': 4.0,
+    'REMOVE_BUG': 3.0,
+    'CREATE_SPECIAL': 7.0,
+    'USE_SPECIAL': 3.0,
+    'DEPLOY_PROCESSORS': 10.0,
+    'CALCULATE_FIBONACCI': 2.0,
+    # God-level commands (expensive overrides)
+    'GOD_OVERRIDE': 20.0,
+    'GOD_PURGE': 25.0,
+    'GOD_FREEZE': 15.0,
+    'GOD_RESET': 50.0,
+    'GOD_REVEAL': 10.0,
+}
+
 # PERSONALITY FILE
 PERSONALITY_FILE = "mcp_personality.json"
 

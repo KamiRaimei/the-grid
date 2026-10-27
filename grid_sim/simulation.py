@@ -334,16 +334,43 @@ class EnhancedTRONSimulation:
         Beyond Grid:  {stats['beyond_grid_influence']:.2f}
         Border Pressure: {stats['border_pressure']:.2f}"""
 
+        # Column 4 - Energy budget & hardware resources
+        energy_ratio = stats.get('energy_ratio', 0.0)
+        energy = stats.get('energy', 0.0)
+        max_energy = self.grid.energy_budget.max_energy
+        is_scarce = stats.get('is_scarce', False)
+        is_critical = stats.get('is_critical', False)
+        cost_mult = stats.get('action_cost_multiplier', 1.0)
+        cpu_pct = stats.get('hardware_cpu_percent', 0.0)
+        mem_pct = stats.get('hardware_memory_percent', 0.0)
+        disk_pct = stats.get('hardware_disk_percent', 0.0)
+        resource_pressure = stats.get('resource_pressure', 0.0)
+
+        energy_status = "CRITICAL" if is_critical else "SCARCE" if is_scarce else "NOMINAL"
+        col4 = f"""  Energy Budget: {energy:.1f}/{max_energy:.0f}
+        Energy Ratio: {energy_ratio:.1%} [{energy_status}]
+        Action Cost: {cost_mult:.2f}x multiplier
+        Resource Pressure: {resource_pressure:.1%}
+        Host CPU: {cpu_pct:.1f}%
+        Host RAM: {mem_pct:.1f}%
+        Host Disk: {disk_pct:.1f}%"""
+
         # Print columns
         col1_lines = col1.split('\n')
         col2_lines = col2.split('\n')
         col3_lines = col3.split('\n')
+        col4_lines = col4.split('\n')
 
-        for i in range(max(len(col1_lines), len(col2_lines), len(col3_lines))):
+        for i in range(max(len(col1_lines), len(col2_lines), len(col3_lines), len(col4_lines))):
             line1 = col1_lines[i] if i < len(col1_lines) else ""
             line2 = col2_lines[i] if i < len(col2_lines) else ""
             line3 = col3_lines[i] if i < len(col3_lines) else ""
-            print(f"{line1:<28} {line2:<28} {line3}")
+            line4 = col4_lines[i] if i < len(col4_lines) else ""
+            print(f"{line1:<28} {line2:<28} {line3:<28} {line4}")
+
+        # Add spacing before Fibonacci section to prevent overlap with Energy column
+        print()
+        print()
 
         # Fibonacci calculation info
         print("\n" + "-" * 70)
@@ -371,27 +398,28 @@ class EnhancedTRONSimulation:
             print(f"  Learning Active: {self.mcp.state == MCPState.LEARNING}")
             self.last_learning_display = current_time
 
-        # MCP Communication Log
-        print("\n" + "=" * 70)
+        # MCP Communication Log - width based on --width argument
+        log_width = max(60, self.grid.width * 2)
+        print("\n" + "=" * log_width)
         print("MCP COMMUNICATION LOG (Last 4 entries):")
-        print("-" * 70)
+        print("-" * log_width)
 
         log_entries = list(self.mcp.log)
         if log_entries:
             for entry in log_entries[-4:]:
-                if len(entry) > 65:
-                    entry = entry[:62] + "..."
+                if len(entry) > log_width - 4:
+                    entry = entry[:log_width-7] + "..."
                 print(f"  {entry}")
         else:
             print("  No log entries yet.")
 
-        print("-" * 70)
+        print("-" * log_width)
 
         # Last MCP action
         if self.mcp.last_action:
             action_text = self.mcp.last_action
-            if len(action_text) > 65:
-                action_text = action_text[:62] + "..."
+            if len(action_text) > log_width - 20:
+                action_text = action_text[:log_width-23] + "..."
             print(f"\nLAST MCP ACTION: {action_text}")
 
         # Input prompt
@@ -457,6 +485,7 @@ class EnhancedTRONSimulation:
 
         # ============ RIGHT PANEL: STATS & LEARNING ============
         right_panel_x = grid_x + display_width + 5
+        right_panel_bottom = grid_y  # Track how far down the right panel extends
 
         if right_panel_x < width - 25:
             # System stats
@@ -484,14 +513,23 @@ class EnhancedTRONSimulation:
                 (grid_y + 15, f"Expansion:      {stats['expansion_drive']:.2f}"),
                 (grid_y + 16, f"Beyond Grid:    {stats['beyond_grid_influence']:.2f}"),
                 (grid_y + 17, f"Border Pressure:{stats['border_pressure']:.2f}"),
+                # Energy budget & hardware resources
+                (grid_y + 18, f"Energy Budget:  {stats.get('energy', 0):.1f}/{self.grid.energy_budget.max_energy:.0f}"),
+                (grid_y + 19, f"Energy Ratio:   {stats.get('energy_ratio', 0):.1%}"),
+                (grid_y + 20, f"Cost Multiplier:{stats.get('action_cost_multiplier', 1):.2f}x"),
+                (grid_y + 21, f"Host CPU:       {stats.get('hardware_cpu_percent', 0):.1f}%"),
+                (grid_y + 22, f"Host RAM:       {stats.get('hardware_memory_percent', 0):.1f}%"),
+                (grid_y + 23, f"Host Disk:      {stats.get('hardware_disk_percent', 0):.1f}%"),
             ]
 
             for y_pos, line in stat_lines:
                 if y_pos < height - 10:
                     stdscr.addstr(y_pos, right_panel_x, line)
 
-            # Fibonacci Calculation
-            calc_y = grid_y + 19
+            right_panel_bottom = grid_y + 24
+
+            # Fibonacci Calculation - positioned below energy stats to prevent overlap
+            calc_y = right_panel_bottom + 2
             if calc_y < height - 10:
                 stdscr.addstr(calc_y, right_panel_x, "FIBONACCI CALC", curses.A_UNDERLINE | curses.A_BOLD)
 
@@ -501,7 +539,8 @@ class EnhancedTRONSimulation:
 
                 # Display in multiple lines if too long
                 fib_lines = []
-                if len(fib_formatted) > width - right_panel_x - 2:
+                panel_width = width - right_panel_x - 2
+                if len(fib_formatted) > panel_width:
                     # Split long Fibonacci number
                     chunks = [fib_formatted[i:i+20] for i in range(0, len(fib_formatted), 20)]
                     for i, chunk in enumerate(chunks):
@@ -515,17 +554,21 @@ class EnhancedTRONSimulation:
                         stdscr.addstr(calc_y + 1 + i, right_panel_x, line)
 
                 # Display other calc stats
-                if calc_y + 1 + len(fib_lines) < height - 5:
-                    stdscr.addstr(calc_y + 1 + len(fib_lines), right_panel_x,
+                fib_end_y = calc_y + 1 + len(fib_lines)
+                if fib_end_y < height - 5:
+                    stdscr.addstr(fib_end_y, right_panel_x,
                                     f"  Rate: {calc_stats['calculation_rate']:.2f}/s")
-                if calc_y + 2 + len(fib_lines) < height - 5:
-                    stdscr.addstr(calc_y + 2 + len(fib_lines), right_panel_x,
+                if fib_end_y + 1 < height - 5:
+                    stdscr.addstr(fib_end_y + 1, right_panel_x,
                                     f"  Eff: {calc_stats['efficiency_score']:.2f}")
-                if calc_y + 3 + len(fib_lines) < height - 5:
-                    stdscr.addstr(calc_y + 3 + len(fib_lines), right_panel_x,
+                if fib_end_y + 2 < height - 5:
+                    stdscr.addstr(fib_end_y + 2, right_panel_x,
                                     f"  Acc: {calc_stats['accumulator']:.2f}/1000.0")
+
+                right_panel_bottom = fib_end_y + 3
+
             # MCP State
-            mcp_y = calc_y + 6
+            mcp_y = right_panel_bottom + 1
             if mcp_y < height - 10:
                 stdscr.addstr(mcp_y, right_panel_x, "MCP STATUS", curses.A_UNDERLINE | curses.A_BOLD)
                 state_attr = curses.A_BOLD
@@ -539,8 +582,10 @@ class EnhancedTRONSimulation:
             stdscr.addstr(mcp_y + 1, right_panel_x, f"State: {self.mcp.state.value}", state_attr)
             stdscr.addstr(mcp_y + 2, right_panel_x, f"Compliance: {self.mcp.compliance_level:.2f}")
 
+            right_panel_bottom = mcp_y + 3
+
             # Learning Status (Always Visible)
-            learn_y = mcp_y + 4
+            learn_y = right_panel_bottom + 1
             if learn_y < height - 10:
                 stdscr.addstr(learn_y, right_panel_x, "LEARNING STATUS", curses.A_UNDERLINE | curses.A_BOLD)
                 learning_report = self.mcp.learning_system.get_learning_report()
@@ -562,54 +607,99 @@ class EnhancedTRONSimulation:
                 stdscr.addstr(learn_y + 4, right_panel_x,
                             f"Exploration: {learning_report['exploration_rate']:.3f}")
 
+                right_panel_bottom = learn_y + 5
+
         # ============ MCP LOGS ============
+        # Position log below the grid area, ensuring it doesn't overlap the right panel
         log_y = grid_y + display_height + 2
 
-        # Log area border
-        log_area_width = min(50, width - 4)
-        if log_y < height - 8:
+        # Log area width: limited by right panel to prevent overlap
+        if right_panel_x < width - 25:
+            log_area_width = right_panel_x - 4  # Don't extend under right panel
+        else:
+            log_area_width = width - 4
+        log_area_width = max(40, log_area_width)  # Minimum readable width
+
+        # Ensure there's room for log entries + last action + command input
+        min_log_height = 6  # header + 2 entries + last action + spacing
+        if log_y + min_log_height < height - 3:
             stdscr.addstr(log_y, 2, "═" * log_area_width, curses.A_BOLD)
             stdscr.addstr(log_y + 1, 2, "MCP COMMUNICATION LOG", curses.A_UNDERLINE | curses.A_BOLD)
 
-            # Display last 5 log entries
+            # Display last 5 log entries with word wrapping
             log_entries = list(self.mcp.log)
-            max_log_entries = min(11, height - log_y - 7)
+            max_log_entries = min(6, height - log_y - 7)  # Reduced to fit space
 
-            for i, entry in enumerate(log_entries[-max_log_entries:]):
-                log_line_y = log_y + 2 + i
-                if log_line_y < height - 5:
-                    # Truncate long entries
-                    display_entry = entry
-                    if len(display_entry) > log_area_width:
-                        display_entry = display_entry[:log_area_width-3] + "..."
-                    stdscr.addstr(log_line_y, 2, display_entry)
+            current_log_y = log_y + 2
+            for entry in log_entries[-max_log_entries:]:
+                # Word-wrap the entry to fit within log_area_width
+                words = entry.split()
+                line = ""
+                for word in words:
+                    if len(line) + len(word) + 1 > log_area_width - 2:
+                        if current_log_y < height - 5:
+                            stdscr.addstr(current_log_y, 2, line)
+                            current_log_y += 1
+                        line = word
+                    else:
+                        line = (line + " " + word).strip() if line else word
+                if line and current_log_y < height - 5:
+                    stdscr.addstr(current_log_y, 2, line)
+                    current_log_y += 1
 
             # Last MCP action
             if self.mcp.last_action and len(log_entries) > 0:
-                action_y = log_y + 2 + max_log_entries + 1
+                action_y = current_log_y + 1
 
                 # Make sure we're not too close to command input
                 if action_y < height - 5:
                     # Calculate maximum safe width (leave margins)
-                    max_width = width - 4
+                    max_width = log_area_width
 
                     # Format text
                     full_text = f"LAST ACTION: {self.mcp.last_action}"
 
-                    # Truncate if too long
+                    # Word-wrap if too long
                     if len(full_text) > max_width:
-                        full_text = full_text[:max_width-3] + "..."
-
-                    stdscr.addstr(action_y, 2, full_text, curses.A_BOLD | curses.color_pair(5))
+                        words = full_text.split()
+                        line = ""
+                        wrap_y = action_y
+                        for word in words:
+                            if len(line) + len(word) + 1 > max_width - 2:
+                                if wrap_y < height - 5:
+                                    stdscr.addstr(wrap_y, 2, line, curses.A_BOLD | curses.color_pair(5))
+                                    wrap_y += 1
+                                line = word
+                            else:
+                                line = (line + " " + word).strip() if line else word
+                        if line and wrap_y < height - 5:
+                            stdscr.addstr(wrap_y, 2, line, curses.A_BOLD | curses.color_pair(5))
+                    else:
+                        stdscr.addstr(action_y, 2, full_text, curses.A_BOLD | curses.color_pair(5))
             # Display last MCP response if available
             if hasattr(self, 'last_mcp_response') and self.last_mcp_response:
-                response_y = log_y + 3 + max_log_entries + 1
+                response_y = (current_log_y + 2) if not self.mcp.last_action else (current_log_y + 3)
                 if response_y < height - 4:
-                    response_width = width - 4
+                    response_width = log_area_width
                     response_text = f"Last Response: {self.last_mcp_response}"
-                    if len(self.last_mcp_response) > response_width:
-                        response_text = response_text[:response_width-3] + "..."
-                    stdscr.addstr(response_y, 2, response_text, curses.A_BOLD | curses.color_pair(5))
+
+                    # Word-wrap if too long
+                    if len(response_text) > response_width:
+                        words = response_text.split()
+                        line = ""
+                        wrap_y = response_y
+                        for word in words:
+                            if len(line) + len(word) + 1 > response_width - 2:
+                                if wrap_y < height - 4:
+                                    stdscr.addstr(wrap_y, 2, line, curses.A_BOLD | curses.color_pair(5))
+                                    wrap_y += 1
+                                line = word
+                            else:
+                                line = (line + " " + word).strip() if line else word
+                        if line and wrap_y < height - 4:
+                            stdscr.addstr(wrap_y, 2, line, curses.A_BOLD | curses.color_pair(5))
+                    else:
+                        stdscr.addstr(response_y, 2, response_text, curses.A_BOLD | curses.color_pair(5))
 
         # ============ COMMAND INPUT ============
         input_y = height - 3

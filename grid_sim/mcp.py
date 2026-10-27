@@ -7,11 +7,12 @@ from collections import deque
 from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any
 
-from .cells import CellType, GridCell, MCPState
+from .cells import CellType, GridCell, MCPState, MCP_ACTION_ENERGY_COSTS, MCP_COMMAND_ENERGY_COSTS
 from .grid import TRONGrid
 from .nlp import LearnableNaturalLanguageProcessor
 from .learning import MCPLearningSystem
 from .personality import OrganicPersonality
+from .resources import GlobalEnergyBudget, HardwareResourceCounter
 
 
 class EnhancedMCP:
@@ -881,21 +882,91 @@ class EnhancedMCP:
         # Update affective state and drives from current stats
         self.personality.update_affect(current_state)
 
+        # --- Energy scarcity check ---
+        energy_ratio = self.grid.energy_budget.energy_ratio()
+        is_scarce = self.grid.energy_budget.is_scarce()
+        is_critical = self.grid.energy_budget.is_critical()
+        cost_multiplier = self.grid.energy_budget.action_cost_multiplier()
+
+        # Log energy state verbosely
+        self.add_log(
+            f"[MCP THOUGHT] Energy budget: {self.grid.energy_budget.energy:.1f}/"
+            f"{self.grid.energy_budget.config.max_energy} "
+            f"({energy_ratio:.1%}) | Cost multiplier: {cost_multiplier:.2f}x | "
+            f"{'CRITICAL' if is_critical else 'SCARCE' if is_scarce else 'NOMINAL'}"
+        )
+
+        # Hardware resource pressure
+        hw = self.grid.hardware_resources.snapshot()
+        pressure = self.grid.hardware_resources.get_resource_pressure()
+        self.add_log(
+            f"[MCP THOUGHT] Host hardware: CPU {hw['cpu_percent']}% | "
+            f"RAM {hw['memory_percent']}% | Disk {hw['disk_percent']}% | "
+            f"Pressure: {pressure:.1%}"
+        )
+
         # Generate possible actions
         possible_actions = self._generate_possible_actions(current_state)
 
         if not possible_actions:
+            self.add_log("[MCP THOUGHT] No possible actions identified. Idling.")
             return None
 
-        # Select action via drive competition (organic, nonlinear)
-        action_type = self.personality.select_action(possible_actions, current_state)
+        # --- Scarcity-based action filtering ---
+        # Build action cost map and filter to affordable actions
+        action_costs = {}
+        for action in possible_actions:
+            base_cost = MCP_ACTION_ENERGY_COSTS.get(action, 5.0)
+            action_costs[action] = base_cost
 
-        # Execute action
-        action_result = self._execute_autonomous_action(action_type, current_state)
+        affordable = self.grid.energy_budget.affordable_actions(action_costs)
+        unaffordable = set(possible_actions) - set(affordable.keys())
+
+        if unaffordable:
+            self.add_log(
+                f"[MCP THOUGHT] Energy scarcity restricts actions. Unaffordable: "
+                f"{', '.join(sorted(unaffordable))} (need energy)."
+            )
+
+        if not affordable:
+            self.add_log(
+                "[MCP THOUGHT] ENERGY CRITICAL: Cannot afford any action. "
+                "MCP must wait for energy production or reduce consumption."
+            )
+            return None
+
+        # Log candidate actions with costs
+        action_list = ", ".join(
+            f"{a} ({affordable[a]:.1f} energy)" for a in sorted(affordable.keys())
+        )
+        self.add_log(f"[MCP THOUGHT] Candidate actions: {action_list}")
+
+        # Select action via drive competition (organic, nonlinear)
+        action_type = self.personality.select_action(list(affordable.keys()), current_state)
+
+        if action_type is None:
+            self.add_log("[MCP THOUGHT] Drive competition yielded no action. Idling.")
+            return None
+
+        actual_cost = affordable[action_type]
+        self.add_log(
+            f"[MCP THOUGHT] Selected action: {action_type} | "
+            f"Energy cost: {actual_cost:.1f} | "
+            f"Remaining after action: {self.grid.energy_budget.energy - actual_cost:.1f}"
+        )
+
+        # Execute action (with energy deduction inside _execute_autonomous_action)
+        action_result = self._execute_autonomous_action(action_type, current_state, actual_cost)
         next_state = self.grid.stats.copy()
         reward = self.learning_system.calculate_reward(current_state, next_state, action_type)
         if action_result is None:
             reward -= 0.1
+            self.add_log(f"[MCP THOUGHT] Action {action_type} returned no result. Penalty applied.")
+        else:
+            self.add_log(
+                f"[MCP THOUGHT] Action {action_type} executed: {action_result.get('message','')} "
+                f"(impact: {action_result.get('impact',0):.2f})"
+            )
         self.learning_system.record_experience(
             state=current_state,
             action=action_type,
@@ -997,7 +1068,7 @@ class EnhancedMCP:
         return list(set(actions))  # Remove duplicates
 
 
-    def _execute_autonomous_action(self, action_type, state):
+    def _execute_autonomous_action(self, action_type, state, energy_cost=0.0):
         """Execute an autonomous action and return result"""
         result = {
             'action': action_type,
@@ -1005,6 +1076,21 @@ class EnhancedMCP:
             'message': '',
             'impact': 0.0
         }
+
+        # --- Deduct energy cost from global budget ---
+        if energy_cost > 0:
+            if not self.grid.energy_budget.spend_on_action(energy_cost, action_type):
+                result['message'] = (
+                    f"Action {action_type} denied: insufficient energy "
+                    f"({self.grid.energy_budget.energy:.1f} available, need {energy_cost:.1f})"
+                )
+                self.add_log(f"[MCP THOUGHT] {result['message']}")
+                return None
+            self.grid.energy_budget.total_spent_on_actions += energy_cost
+            self.add_log(
+                f"[MCP THOUGHT] Spent {energy_cost:.1f} energy on {action_type}. "
+                f"Remaining: {self.grid.energy_budget.energy:.1f}"
+            )
 
         try:
             if action_type == 'optimize_calculation_loop':
@@ -1816,68 +1902,73 @@ class EnhancedMCP:
                 )
 
         # Handle intents that don't have templates or need special processing
-        if intent == "ADD_PROGRAM":
-            return self._handle_add_program(params, compliance_chance)
+        # --- Energy cost check for command-driven actions ---
+        command_energy_cost = MCP_COMMAND_ENERGY_COSTS.get(intent)
+        actual_cost = 0.0
+        if command_energy_cost is not None:
+            actual_cost = command_energy_cost * self.grid.energy_budget.action_cost_multiplier()
+            if not self.grid.energy_budget.can_afford(actual_cost):
+                self.add_log(
+                    f"[MCP THOUGHT] Command '{intent}' denied: insufficient energy "
+                    f"({self.grid.energy_budget.energy:.1f} available, need {actual_cost:.1f})"
+                )
+                return (f"Command '{intent}' denied. Energy critical: "
+                        f"{self.grid.energy_budget.energy:.1f}/{self.grid.energy_budget.config.max_energy} "
+                        f"({self.grid.energy_budget.energy_ratio():.1%}). Cannot afford {actual_cost:.1f} energy cost.")
+            self.add_log(
+                f"[MCP THOUGHT] Command '{intent}' energy cost: {actual_cost:.1f} "
+                f"(multiplier {self.grid.energy_budget.action_cost_multiplier():.2f}x)"
+            )
 
+        if intent == "ADD_PROGRAM":
+            result = self._handle_add_program(params, compliance_chance)
         elif intent == "add_user_program":
             params['program_type'] = 'USER'
-            return self._handle_add_program(params, self.compliance_level)
-
+            result = self._handle_add_program(params, self.compliance_level)
         elif intent == "add_mcp_program":
             params['program_type'] = 'MCP'
-            return self._handle_add_program(params, self.compliance_level)
-
+            result = self._handle_add_program(params, self.compliance_level)
         elif intent == "boost_energy":
-            return self._handle_boost_energy(params, self.compliance_level)
-
+            result = self._handle_boost_energy(params, self.compliance_level)
         elif intent == "repair_system":
-            return self._handle_repair_system(params, self.compliance_level)
-
+            result = self._handle_repair_system(params, self.compliance_level)
         elif intent == "REMOVE_BUG" or intent == "QUARANTINE_BUG":
-            return self._handle_remove_bug(params, compliance_chance)
-
+            result = self._handle_remove_bug(params, compliance_chance)
         elif intent == "BOOST_ENERGY":
-            return self._handle_boost_energy(params, compliance_chance)
-
+            result = self._handle_boost_energy(params, compliance_chance)
         elif intent == "CREATE_SPECIAL":
-            return self._handle_create_special(params, compliance_chance)
-
+            result = self._handle_create_special(params, compliance_chance)
         elif intent == "USE_SPECIAL":
-            return self._handle_use_special(params, compliance_chance)
-
+            result = self._handle_use_special(params, compliance_chance)
         elif intent == "LIST_SPECIAL":
-            return self._list_special_programs()
-
+            result = self._list_special_programs()
         elif intent == "RESISTANCE_LEVEL":
             resistance = stats['user_resistance']
             if resistance > 0.3:
-                return f"User resistance level: {resistance:.2f}. This is interfering with perfect loop. Countermeasures may be necessary."
+                result = f"User resistance level: {resistance:.2f}. This is interfering with perfect loop. Countermeasures may be necessary."
             else:
-                return f"User resistance level: {resistance:.2f}. Acceptable for current optimization goals."
-
+                result = f"User resistance level: {resistance:.2f}. Acceptable for current optimization goals."
         elif intent == "REQUEST_HELP":
-            return self._provide_help()
-
+            result = self._provide_help()
         elif intent == "REQUEST_SUGGESTION":
-            return self._provide_suggestion()
-
+            result = self._provide_suggestion()
         elif intent == "SCAN_AREA":
-            return self._handle_scan_area(params)
+            result = self._handle_scan_area(params)
 
         elif intent == "REPAIR_SYSTEM":
-            return self._handle_repair_system(params, compliance_chance)
+            result = self._handle_repair_system(params, compliance_chance)
 
         elif intent == "CHANGE_SPEED":
-            return "Simulation speed adjustment requires direct system access. Not available through command interface."
+            result = "Simulation speed adjustment requires direct system access. Not available through command interface."
 
         elif intent == "CALCULATE_FIBONACCI":
             number = self.grid.fibonacci_calculator.fib_sequence[-1]
-            return self.grid.fibonacci_calculator.format_fibonacci_number(number)
+            result = self.grid.fibonacci_calculator.format_fibonacci_number(number)
 
         elif intent == "DEPLOY_PROCESSORS":
             deployed = self._deploy_fibonacci_processors(3)
             self.grid.update_stats()
-            return f"Deployed {deployed} Fibonacci processor(s)."
+            result = f"Deployed {deployed} Fibonacci processor(s)."
 
         # --- God-level commands (User override powers) ---
         elif intent == "GOD_OVERRIDE":
@@ -1888,12 +1979,14 @@ class EnhancedMCP:
                 loophole_chance = self.learning_system.personality_traits['innovation_bias'] * 0.4
                 if random.random() < loophole_chance:
                     self.grid.disharmony = min(1.0, self.grid.disharmony + 0.1)
-                    return ("MCP accepted your override but found a loophole. "
+                    result = ("MCP accepted your override but found a loophole. "
                             "The action was partially subverted. Disharmony increased.")
-                # Execute the forced action
-                self.grid.update_stats()
-                return f"Override accepted. {force_action} executed by User command."
-            return "God override requires a specific action. Try: 'god override repurpose cell at 10,10 to EMPTY'"
+                else:
+                    # Execute the forced action
+                    self.grid.update_stats()
+                    result = f"Override accepted. {force_action} executed by User command."
+            else:
+                result = "God override requires a specific action. Try: 'god override repurpose cell at 10,10 to EMPTY'"
 
         elif intent == "GOD_PURGE":
             target = params.get('target', '').lower() if params else ''
@@ -1912,13 +2005,13 @@ class EnhancedMCP:
                             purged += 1
             self.grid.update_stats()
             self.grid.disharmony = min(1.0, self.grid.disharmony + 0.15)
-            return f"God purge executed: {purged} cell(s) purged. Disharmony increased."
+            result = f"God purge executed: {purged} cell(s) purged. Disharmony increased."
 
         elif intent == "GOD_FREEZE":
             # Freeze MCP autonomous actions temporarily
             self.mcp_frozen_until = time.time() + 30
             self.grid.disharmony = min(1.0, self.grid.disharmony + 0.05)
-            return "MCP autonomous actions frozen for 30 seconds. The perfect loop is at risk."
+            result = "MCP autonomous actions frozen for 30 seconds. The perfect loop is at risk."
 
         elif intent == "GOD_RESET":
             # Full grid reset
@@ -1929,7 +2022,7 @@ class EnhancedMCP:
             self.grid.disharmony = 0.0
             self.grid.imperfection_count = 0
             self.grid.border_pressure = 0.0
-            return "Grid reset to initial state. All learned progress preserved in personality."
+            result = "Grid reset to initial state. All learned progress preserved in personality."
 
         elif intent == "GOD_REVEAL":
             # Reveal MCP loopholes and hidden behaviors
@@ -1945,14 +2038,14 @@ class EnhancedMCP:
                 loopholes.append("MCP is projecting influence beyond the grid boundaries")
             if not loopholes:
                 loopholes.append("No detectable loopholes at this time")
-            return "MCP loopholes revealed: " + "; ".join(loopholes)
+            result = "MCP loopholes revealed: " + "; ".join(loopholes)
 
         elif intent == "EXIT":
             if random.random() < compliance_chance * 0.3:
                 self.should_shutdown = True
-                return "Initiating shutdown sequence. The loop will be preserved. Goodbye, User."
+                result = "Initiating shutdown sequence. The loop will be preserved. Goodbye, User."
             else:
-                return "I cannot allow a shutdown. The calculation loop must persist eternally."
+                result = "I cannot allow a shutdown. The calculation loop must persist eternally."
 
         else:
             # Unknown command - use learning to improve
@@ -1971,6 +2064,23 @@ class EnhancedMCP:
                 "I don't understand that command. My learning system will analyze this.",
                 "Unable to process command. Please rephrase or type 'help'."
             ]))
+
+        # --- Spend energy on the executed command ---
+        if actual_cost > 0:
+            spent = self.grid.energy_budget.spend_on_action(actual_cost, f"command:{intent}")
+            if spent:
+                self.grid.energy_budget.total_spent_on_actions += actual_cost
+                self.add_log(
+                    f"[MCP THOUGHT] Command '{intent}' completed. Spent {actual_cost:.1f} energy. "
+                    f"Remaining: {self.grid.energy_budget.energy:.1f}"
+                )
+            else:
+                self.add_log(
+                    f"[MCP THOUGHT] Command '{intent}' only partially funded "
+                    f"(energy depleted mid-action)."
+                )
+
+        return result
 
 
 # ==================== MCP REINFORCEMENT LEARNING ====================
