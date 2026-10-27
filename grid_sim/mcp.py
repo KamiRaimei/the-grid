@@ -48,6 +48,10 @@ class EnhancedMCP:
         'cannibalize_user_programs_aggressive': 'cannibalize_user_programs',
         'cannibalize_user_programs_selective': 'cannibalize_user_programs',
         'harvest_user_energy': 'cannibalize_user_programs',
+        # harvest_energy_from_programs variants
+        'harvest_energy_from_users': 'harvest_energy_from_programs',
+        'harvest_energy_from_mcp': 'harvest_energy_from_programs',
+        'drain_all_programs': 'harvest_energy_from_programs',
         # emergency_suppression variants
         'rapid_suppression': 'emergency_suppression',
         'mass_conversion': 'emergency_suppression',
@@ -1147,7 +1151,7 @@ class EnhancedMCP:
             'enhance_collaboration', 'inefficiency_cleanup', 'cell_repurposing',
             'optimize_cell_efficiency', 'maintain_energy_grid',
             'optimize_resource_distribution', 'balance_system_load',
-            'suppress_user_programs',
+            'suppress_user_programs', 'harvest_energy_from_programs',
             # Expansion actions: project the perfect system beyond the grid
             'expand_beyond_grid', 'project_influence', 'extend_border',
         }
@@ -1167,6 +1171,11 @@ class EnhancedMCP:
 
         if self._user_program_degradation():
             actions.append('suppress_user_programs')
+
+        # MCP considers harvesting energy from programs when energy is low
+        energy_ratio = state.get('energy_ratio', 1.0)
+        if energy_ratio < 0.5:
+            actions.append('harvest_energy_from_programs')
 
         if state.get('grid_bugs', 0) > 5:
             actions.extend([
@@ -1263,6 +1272,46 @@ class EnhancedMCP:
                 result['message'] = f"Suppressed {suppressed} user program(s) during performance degradation"
                 if suppressed:
                     self._last_user_suppression_generation = self.grid.generation
+
+            elif base_action == 'harvest_energy_from_programs':
+                # MCP harvests energy from both MCP and User programs
+                # User programs get upset (disharmony increases, rebellion grows)
+                harvested = 0.0
+                users_harvested = 0
+                mcps_harvested = 0
+                for y in range(self.grid.height):
+                    for x in range(self.grid.width):
+                        cell = self.grid.grid[y][x]
+                        if cell.cell_type == CellType.USER_PROGRAM:
+                            # Drain 30% of user program's energy
+                            drain = cell.energy * 0.3
+                            cell.energy = max(0.1, cell.energy - drain)
+                            harvested += drain
+                            users_harvested += 1
+                            # User programs get upset - increase disharmony
+                            self.grid.disharmony = min(1.0, self.grid.disharmony + 0.01)
+                        elif cell.cell_type == CellType.MCP_PROGRAM:
+                            # Drain 15% of MCP program's energy (less aggressive on own)
+                            drain = cell.energy * 0.15
+                            cell.energy = max(0.1, cell.energy - drain)
+                            harvested += drain
+                            mcps_harvested += 1
+                if harvested > 0:
+                    self.grid.energy_budget.energy = min(
+                        self.grid.energy_budget.max_energy,
+                        self.grid.energy_budget.energy + harvested
+                    )
+                    result['success'] = True
+                    result['message'] = (
+                        f"Harvested {harvested:.1f} energy from "
+                        f"{users_harvested} user(s) and {mcps_harvested} MCP program(s)"
+                    )
+                    # Harvesting from users increases disharmony significantly
+                    if users_harvested > 0:
+                        self.grid.disharmony = min(1.0, self.grid.disharmony + 0.05 * users_harvested)
+                        self.grid.stats['user_resistance'] = min(1.0, self.grid.stats.get('user_resistance', 0) + 0.02 * users_harvested)
+                else:
+                    result['message'] = "No programs available to harvest energy from"
 
             elif base_action == 'deploy_fibonacci_processors':
                 # Deploy Fibonacci processors

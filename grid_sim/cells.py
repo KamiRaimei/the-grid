@@ -53,28 +53,32 @@ SPECIAL_PROGRAM_TYPES = ["SCANNER", "DEFENDER", "REPAIR", "SABOTEUR", "RECONFIGU
 # ==================== MCP ACTION ENERGY COSTS ====================
 # Energy cost for each MCP autonomous action (drawn from global energy budget)
 MCP_ACTION_ENERGY_COSTS = {
-    'optimize_calculation_loop': 5.0,
-    'deploy_fibonacci_processors': 10.0,
-    'quarantine_grid_bugs': 3.0,
-    'contain_bug_outbreak': 5.0,
-    'stabilize_system': 4.0,
-    'boost_calculation_rate': 6.0,
-    'add_calculation_infrastructure': 8.0,
-    'optimize_fibonacci_calculation': 5.0,
-    'improve_cell_connectivity': 4.0,
-    'add_data_streams': 3.0,
-    'enhance_collaboration': 3.0,
-    'inefficiency_cleanup': 4.0,
-    'cell_repurposing': 5.0,
-    'optimize_cell_efficiency': 6.0,
-    'maintain_energy_grid': 4.0,
-    'optimize_resource_distribution': 5.0,
-    'balance_system_load': 4.0,
-    'suppress_user_programs': 8.0,
-    # Expansion actions (expensive - project beyond grid)
-    'expand_beyond_grid': 15.0,
-    'project_influence': 12.0,
-    'extend_border': 10.0,
+    # Free actions (no energy penalty)
+    'optimize_calculation_loop': 0.0,
+    'improve_cell_cooperation': 0.0,
+    'improve_cell_connectivity': 0.0,
+    'enhance_collaboration': 0.0,
+    'optimize_fibonacci_calculation': 0.0,
+    'optimize_cell_efficiency': 0.0,
+    'optimize_resource_distribution': 0.0,
+    'balance_system_load': 0.0,
+    'boost_calculation_rate': 0.0,
+    'cell_repurposing': 0.0,
+    'suppress_user_programs': 0.0,
+    'harvest_energy_from_programs': 0.0,
+    'inefficiency_cleanup': 0.0,
+    # Expansion actions (free - project beyond grid)
+    'expand_beyond_grid': 0.0,
+    'project_influence': 0.0,
+    'extend_border': 0.0,
+    # Energy-cost actions: deploying programs, managing bugs, adding data/energy lines
+    'deploy_fibonacci_processors': 10.0,   # deploying programs
+    'add_calculation_infrastructure': 8.0,  # deploying programs/infrastructure
+    'add_data_streams': 3.0,                # adding data lines
+    'maintain_energy_grid': 4.0,            # adding energy lines
+    'quarantine_grid_bugs': 3.0,            # managing bugs
+    'contain_bug_outbreak': 5.0,            # managing bugs
+    'stabilize_system': 4.0,                # managing bugs/system
 }
 
 # Energy cost for MCP command-driven actions
