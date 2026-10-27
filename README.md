@@ -1,8 +1,10 @@
-The Grid - System Simulation
+![Screenshot](screenshot.png)
+
+# The Grid - System Simulation
 
 A system simulation where the objective is a perfect Fibonacci calculation loop system with an automated Master Control Program as control.
 
-Requirements
+## Requirements
 
 Linux / macOS:
 - Python 3.12 or higher
@@ -13,7 +15,7 @@ Windows:
 - numpy
 - windows-curses
 
-How to run
+## How to run
 
 Install dependencies:
 
