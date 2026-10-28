@@ -229,14 +229,17 @@ class HardwareResourceCounter:
 @dataclass
 class EnergyBudgetConfig:
     """Configuration for the global energy budget."""
-    initial_energy: float = 5000.0          # Starting energy pool
-    max_energy: float = 10000.0             # Hard cap on energy storage
+    initial_energy: float = 25000.0         # Starting energy pool
+    max_energy: float = 100000.0            # Hard cap on energy storage (raised ceiling)
     production_per_energy_line: float = 5.0  # Energy produced per ENERGY_LINE per tick
     production_per_system_core: float = 25.0 # Energy produced per SYSTEM_CORE per tick
     consumption_per_user_program: float = 0.5  # Energy consumed per USER_PROGRAM per tick
     consumption_per_mcp_program: float = 0.4   # Energy consumed per MCP_PROGRAM per tick
     consumption_per_special_program: float = 0.25 # Energy consumed per SPECIAL_PROGRAM per tick
     consumption_per_fib_processor: float = 0.15   # Energy consumed per FIBONACCI_PROCESSOR per tick
+    # Energy cost for cell replication (charged to the global budget when MCP approves)
+    consumption_per_user_replication: float = 10.0   # Energy MCP must spend to approve a user program replication
+    consumption_per_mcp_replication: float = 8.0     # Energy MCP must spend to approve an MCP program replication
     base_leak_rate: float = 0.005           # Base energy loss per tick (entropy)
     scarcity_threshold: float = 0.3         # Below this ratio, energy is "scarce"
     critical_threshold: float = 0.1         # Below this ratio, energy is "critical"

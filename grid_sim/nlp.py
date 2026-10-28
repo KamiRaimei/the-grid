@@ -92,6 +92,11 @@ class LearnableNaturalLanguageProcessor:
                 # Fibonacci calculation
                 "calculate_fibonacci": ["calculate fibonacci", "compute fibonacci", "next fibonacci", "fibonacci number"],
                 "deploy_processors": ["deploy processors", "add processors", "create processors", "fibonacci processors"],
+
+                # User protection commands (MCP protects users from bugs)
+                "protect_users": ["protect users", "protect user programs", "defend users", "shield user programs"],
+                "negotiate_users": ["negotiate with users", "talk to users", "diplomacy", "peace treaty", "user alliance"],
+                "rehabilitate_users": ["rehabilitate users", "rehabilitate rebels", "reintegrate users", "calm users"],
             }
 
     def _load_learned_intents(self):
