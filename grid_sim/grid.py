@@ -59,6 +59,7 @@ class TRONGrid:
             'optimal_state': 0.0,
             'calculation_rate': 0.0,  # calculation rate of simulation
             'cell_cooperation': 0.5,  # cell coorperation stats
+            'user_favor': 0.0,        # User programs' favor toward MCP (0.0-1.0)
         }
         self.system_status = SystemStatus.OPTIMAL
         self.history = deque(maxlen=100)
@@ -112,6 +113,13 @@ class TRONGrid:
         # Cooldown on heavy compute time - Optimizations
         self.last_expensive_op_time = 0
         self.expensive_op_cooldown = 0.5  # seconds
+
+    def add_log(self, message):
+        """Add a log message to the grid history."""
+        self.history.append({
+            'generation': self.generation,
+            'message': message,
+        })
 
     def _get_neighbors(self, x, y, radius=1):
         """Get valid neighbor coordinates without bounds checking in inner loops"""
@@ -638,13 +646,26 @@ class TRONGrid:
                                     )
                                     continue
 
-                    # Stay in place, efficient energy usage
-                    new_grid[y][x] = GridCell(
-                        cell.cell_type,
-                        max(0.3, cell.energy - 0.01),  # Less energy decay for MCP
-                        cell.age + 1,
-                        metadata=cell.metadata.copy()
-                    )
+                    # Execute pending MCP commands (MCP commands its cells to act)
+                    command_results = self.execute_mcp_cell_commands(x, y, cell, new_grid)
+                    if command_results:
+                        # MCP Program Cell executed commands - it stays in place
+                        new_grid[y][x] = GridCell(
+                            cell.cell_type,
+                            max(0.3, cell.energy - 0.01),
+                            cell.age + 1,
+                            metadata=cell.metadata.copy()
+                        )
+                        for result in command_results:
+                            self.add_log(f"MCP Cell ({x},{y}): {result}")
+                    else:
+                        # No pending commands - normal MCP behavior
+                        new_grid[y][x] = GridCell(
+                            cell.cell_type,
+                            max(0.3, cell.energy - 0.01),  # Less energy decay for MCP
+                            cell.age + 1,
+                            metadata=cell.metadata.copy()
+                        )
 
                 # SPECIAL PROGRAMS - Stay in place and boost optimization
                 elif cell.cell_type == CellType.SPECIAL_PROGRAM:
@@ -1156,10 +1177,13 @@ class TRONGrid:
             counts[CellType.MCP_PROGRAM] / total_control_programs
             if total_control_programs else 0.5
         )
-        user_resistance = (
+        # Base user resistance from population share, reduced by user favor toward MCP
+        base_user_resistance = (
             counts[CellType.USER_PROGRAM] / total_control_programs
             if total_control_programs else 0.0
         )
+        user_favor = self.stats.get('user_favor', 0.0)
+        user_resistance = max(0.0, base_user_resistance * (1.0 - user_favor * 0.5))
 
         # Get calculation stats
         calc_stats = self.fibonacci_calculator.get_calculation_stats()
@@ -1185,6 +1209,8 @@ class TRONGrid:
             'optimal_state': self._calculate_optimal_state(),
             'calculation_rate': calc_stats['calculation_rate'],
             'cell_cooperation': cell_cooperation,
+            # User favor persists across ticks with slow decay
+            'user_favor': self.stats.get('user_favor', 0.0) * 0.99,
             'expansion_drive': self.expansion_drive,
             'beyond_grid_influence': self.beyond_grid_influence,
             'perfection_level': self.perfection_level,
@@ -1428,10 +1454,743 @@ class TRONGrid:
                 cell.metadata['is_calculator'] = True
                 cell.metadata['calculation_power'] = energy
 
+            # Initialize pending commands for MCP Program Cells
+            if cell_type == CellType.MCP_PROGRAM:
+                cell.metadata['pending_commands'] = []
+
             self.grid[y][x] = cell
             self.update_stats()
             return True
         return False
+
+    # ==================== MCP COMMAND DISTRIBUTION ====================
+
+    def distribute_command_to_mcp_cells(self, command_type, params=None, max_cells=5):
+        """Distribute an MCP command to available MCP Program Cells.
+
+        MCP commands its own MCP Program Cells to execute actions rather than
+        acting directly. Each MCP Program Cell receives the command in its
+        pending_commands queue and executes it during the next evolve() cycle.
+
+        Args:
+            command_type: The type of command (e.g. 'protect_user_programs')
+            params: Optional parameters for the command
+            max_cells: Maximum number of MCP Program Cells to assign the command to
+
+        Returns:
+            Number of MCP Program Cells that received the command
+        """
+        if params is None:
+            params = {}
+
+        # Find MCP Program Cells that can receive commands
+        mcp_cells = []
+        for y in range(self.height):
+            for x in range(self.width):
+                cell = self.grid[y][x]
+                if cell.cell_type == CellType.MCP_PROGRAM:
+                    pending = cell.metadata.get('pending_commands', [])
+                    # Only assign to cells with capacity (not overloaded)
+                    if len(pending) < 3:
+                        mcp_cells.append((x, y, cell))
+
+        if not mcp_cells:
+            return 0
+
+        # Distribute command to up to max_cells MCP Program Cells
+        assigned = 0
+        for x, y, cell in mcp_cells[:max_cells]:
+            if 'pending_commands' not in cell.metadata:
+                cell.metadata['pending_commands'] = []
+            cell.metadata['pending_commands'].append({
+                'command': command_type,
+                'params': params.copy(),
+                'issued_at': self.generation,
+            })
+            assigned += 1
+
+        return assigned
+
+    def execute_mcp_cell_commands(self, x, y, cell, new_grid):
+        """Execute pending commands on an MCP Program Cell during evolve().
+
+        This is called from the grid's evolve() method when processing an
+        MCP Program Cell. The cell executes its pending commands and returns
+        any grid modifications.
+
+        Args:
+            x, y: Cell coordinates
+            cell: The MCP Program Cell
+            new_grid: The new grid being built (for writing results)
+
+        Returns:
+            List of result messages from executed commands
+        """
+        pending = cell.metadata.get('pending_commands', [])
+        if not pending:
+            return []
+
+        results = []
+        remaining = []
+
+        for cmd in pending:
+            command_type = cmd['command']
+            params = cmd.get('params', {})
+
+            # Execute the command through this MCP Program Cell
+            success, message = self._mcp_cell_execute_command(
+                command_type, params, x, y, cell, new_grid
+            )
+            results.append(f"[{command_type}] {message}")
+
+            # Command executed - don't keep it (one-shot commands)
+            # If not successful, keep it for retry
+            if not success:
+                remaining.append(cmd)
+
+        cell.metadata['pending_commands'] = remaining
+        return results
+
+    def _mcp_cell_execute_command(self, command_type, params, x, y, cell, new_grid):
+        """Execute a single command through an MCP Program Cell.
+
+        The MCP Program Cell acts as MCP's agent, carrying out the command
+        on the grid around it.
+
+        Returns:
+            (success: bool, message: str)
+        """
+        from .cells import CellType
+
+        # Normalize command type to lowercase for case-insensitive matching
+        command_type = command_type.lower()
+
+        # --- Bug management commands ---
+        if command_type == 'quarantine_grid_bugs':
+            return self._mcp_cell_quarantine_bugs(x, y, cell, new_grid)
+
+        elif command_type == 'remove_bug':
+            return self._mcp_cell_quarantine_bugs(x, y, cell, new_grid)
+
+        elif command_type == 'contain_bug_outbreak':
+            return self._mcp_cell_contain_bug_outbreak(x, y, cell, new_grid)
+
+        elif command_type == 'stabilize_system':
+            return self._mcp_cell_stabilize_system(x, y, cell, new_grid)
+
+        elif command_type == 'repair_system':
+            return self._mcp_cell_stabilize_system(x, y, cell, new_grid)
+
+        # --- User protection commands ---
+        elif command_type == 'protect_user_programs':
+            return self._mcp_cell_protect_users(x, y, cell, new_grid)
+
+        elif command_type == 'protect_users':
+            return self._mcp_cell_protect_users(x, y, cell, new_grid)
+
+        elif command_type == 'negotiate_with_users':
+            return self._mcp_cell_negotiate_users(x, y, cell, new_grid)
+
+        elif command_type == 'negotiate_users':
+            return self._mcp_cell_negotiate_users(x, y, cell, new_grid)
+
+        elif command_type == 'rehabilitate_rebels':
+            return self._mcp_cell_rehabilitate_rebels(x, y, cell, new_grid)
+
+        elif command_type == 'rehabilitate_users':
+            return self._mcp_cell_rehabilitate_rebels(x, y, cell, new_grid)
+
+        # --- Program management commands ---
+        elif command_type == 'add_program':
+            return self._mcp_cell_add_infrastructure(x, y, cell, new_grid)
+
+        elif command_type == 'create_special':
+            return self._mcp_cell_add_infrastructure(x, y, cell, new_grid)
+
+        elif command_type == 'use_special':
+            return self._mcp_cell_add_infrastructure(x, y, cell, new_grid)
+
+        elif command_type == 'calculate_fibonacci':
+            return self._mcp_cell_optimize_loop(x, y, cell, new_grid)
+
+        elif command_type == 'delete_cell':
+            return self._mcp_cell_cleanup_inefficient(x, y, cell, new_grid)
+
+        elif command_type == 'repurpose_cell':
+            return self._mcp_cell_repurpose_cells(x, y, cell, new_grid)
+
+        # --- Calculation infrastructure commands ---
+        elif command_type == 'deploy_fibonacci_processors':
+            return self._mcp_cell_deploy_processors(x, y, cell, new_grid)
+
+        elif command_type == 'deploy_processors':
+            return self._mcp_cell_deploy_processors(x, y, cell, new_grid)
+
+        elif command_type == 'add_calculation_infrastructure':
+            return self._mcp_cell_add_infrastructure(x, y, cell, new_grid)
+
+        elif command_type == 'add_data_streams':
+            return self._mcp_cell_add_data_streams(x, y, cell, new_grid)
+
+        elif command_type == 'maintain_energy_grid':
+            return self._mcp_cell_maintain_energy(x, y, cell, new_grid)
+
+        elif command_type == 'boost_energy':
+            return self._mcp_cell_maintain_energy(x, y, cell, new_grid)
+
+        elif command_type == 'boost_calculation_rate':
+            return self._mcp_cell_boost_calculation(x, y, cell, new_grid)
+
+        elif command_type == 'optimize_calculation_loop':
+            return self._mcp_cell_optimize_loop(x, y, cell, new_grid)
+
+        elif command_type == 'optimize_loop':
+            return self._mcp_cell_optimize_loop(x, y, cell, new_grid)
+
+        elif command_type == 'improve_cell_connectivity':
+            return self._mcp_cell_improve_connectivity(x, y, cell, new_grid)
+
+        elif command_type == 'improve_cell_cooperation':
+            return self._mcp_cell_improve_connectivity(x, y, cell, new_grid)
+
+        elif command_type == 'enhance_collaboration':
+            return self._mcp_cell_improve_connectivity(x, y, cell, new_grid)
+
+        elif command_type == 'inefficiency_cleanup':
+            return self._mcp_cell_cleanup_inefficient(x, y, cell, new_grid)
+
+        elif command_type == 'cell_repurposing':
+            return self._mcp_cell_repurpose_cells(x, y, cell, new_grid)
+
+        elif command_type == 'optimize_cell_efficiency':
+            return self._mcp_cell_optimize_efficiency(x, y, cell, new_grid)
+
+        elif command_type == 'optimize_cells':
+            return self._mcp_cell_optimize_efficiency(x, y, cell, new_grid)
+
+        elif command_type == 'optimize_resource_distribution':
+            return self._mcp_cell_optimize_efficiency(x, y, cell, new_grid)
+
+        elif command_type == 'balance_system_load':
+            return self._mcp_cell_boost_calculation(x, y, cell, new_grid)
+
+        # --- Expansion commands ---
+        elif command_type == 'expand_beyond_grid':
+            return self._mcp_cell_expand_beyond(x, y, cell, new_grid)
+
+        elif command_type == 'project_influence':
+            return self._mcp_cell_project_influence(x, y, cell, new_grid)
+
+        elif command_type == 'extend_border':
+            return self._mcp_cell_extend_border(x, y, cell, new_grid)
+
+        # --- Desperate commands ---
+        elif command_type == 'cannibalize_user_programs':
+            return self._mcp_cell_cannibalize_users(x, y, cell, new_grid)
+
+        elif command_type == 'emergency_suppression':
+            return self._mcp_cell_emergency_suppression(x, y, cell, new_grid)
+
+        elif command_type == 'scavenge_infrastructure':
+            return self._mcp_cell_scavenge(x, y, cell, new_grid)
+
+        elif command_type == 'overdrive_calculators':
+            return self._mcp_cell_overdrive(x, y, cell, new_grid)
+
+        elif command_type == 'desperate_repurpose':
+            return self._mcp_cell_desperate_repurpose(x, y, cell, new_grid)
+
+        # --- User program management commands ---
+        elif command_type == 'suppress_user_programs':
+            return self._mcp_cell_suppress_users(x, y, cell, new_grid)
+
+        elif command_type == 'harvest_energy_from_programs':
+            return self._mcp_cell_harvest_energy(x, y, cell, new_grid)
+
+        # --- Unknown command ---
+        return False, f"Unknown command: {command_type}"
+
+    # --- MCP Program Cell command implementations ---
+
+    def _mcp_cell_quarantine_bugs(self, x, y, cell, new_grid):
+        """MCP Program Cell quarantines nearby grid bugs."""
+        contained = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    if self.grid[ny][nx].cell_type == CellType.GRID_BUG:
+                        new_grid[ny][nx] = GridCell(CellType.ISO_BLOCK, 0.9)
+                        contained += 1
+        return contained > 0, f"Quarantined {contained} bug(s)"
+
+    def _mcp_cell_contain_bug_outbreak(self, x, y, cell, new_grid):
+        """MCP Program Cell contains bug outbreak in surrounding area."""
+        contained = 0
+        for dy in [-2, -1, 0, 1, 2]:
+            for dx in [-2, -1, 0, 1, 2]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    if self.grid[ny][nx].cell_type == CellType.GRID_BUG:
+                        new_grid[ny][nx] = GridCell(CellType.ISO_BLOCK, 0.9)
+                        contained += 1
+        return contained > 0, f"Contained {contained} bug(s) in outbreak"
+
+    def _mcp_cell_stabilize_system(self, x, y, cell, new_grid):
+        """MCP Program Cell stabilizes surrounding area."""
+        stabilized = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type == CellType.EMPTY:
+                        new_grid[ny][nx] = GridCell(CellType.ENERGY_LINE, 0.8)
+                        stabilized += 1
+        return stabilized > 0, f"Stabilized {stabilized} cell(s)"
+
+    def _mcp_cell_protect_users(self, x, y, cell, new_grid):
+        """MCP Program Cell protects nearby user programs from bugs."""
+        protected = 0
+        bugs_quarantined = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    neighbor = self.grid[ny][nx]
+                    if neighbor.cell_type == CellType.GRID_BUG:
+                        new_grid[ny][nx] = GridCell(CellType.ISO_BLOCK, 0.9)
+                        bugs_quarantined += 1
+                        protected += 1
+                    elif neighbor.cell_type == CellType.USER_PROGRAM:
+                        # Reinforce user program energy
+                        new_grid[ny][nx] = GridCell(
+                            CellType.USER_PROGRAM,
+                            min(1.0, neighbor.energy + 0.1),
+                            neighbor.age,
+                            personality=neighbor.personality,
+                        )
+                        protected += 1
+        if bugs_quarantined > 0:
+            self.stats['user_favor'] = min(
+                1.0, self.stats.get('user_favor', 0.0) + 0.03 * bugs_quarantined
+            )
+            self.disharmony = max(0.0, self.disharmony - 0.01 * bugs_quarantined)
+        return protected > 0, f"Protected {protected} user program(s) from bugs"
+
+    def _mcp_cell_negotiate_users(self, x, y, cell, new_grid):
+        """MCP Program Cell negotiates with nearby user programs."""
+        users_contacted = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    neighbor = self.grid[ny][nx]
+                    if neighbor.cell_type == CellType.USER_PROGRAM:
+                        users_contacted += 1
+                        # Reduce rebellion, increase cooperation
+                        p = neighbor.personality
+                        if p:
+                            p.rebellion = max(0.0, p.rebellion - 0.1)
+                            p.cooperation = min(1.0, p.cooperation + 0.1)
+                            neighbor.personality = p
+                        neighbor.energy = min(1.0, neighbor.energy + 0.05)
+                        new_grid[ny][nx] = neighbor
+
+        if users_contacted > 0:
+            self.stats['user_favor'] = min(
+                1.0, self.stats.get('user_favor', 0.0) + 0.05
+            )
+            self.disharmony = max(0.0, self.disharmony - 0.05)
+            self.stats['user_resistance'] = max(
+                0.0, self.stats.get('user_resistance', 0.0) - 0.08
+            )
+        return users_contacted > 0, f"Negotiated with {users_contacted} user program(s)"
+
+    def _mcp_cell_rehabilitate_rebels(self, x, y, cell, new_grid):
+        """MCP Program Cell rehabilitates rebel user programs nearby."""
+        rehabilitated = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    neighbor = self.grid[ny][nx]
+                    if neighbor.cell_type == CellType.USER_PROGRAM:
+                        p = neighbor.personality
+                        if p and p.rebellion > 0.5:
+                            p.rebellion = max(0.0, p.rebellion - 0.2)
+                            p.cooperation = min(1.0, p.cooperation + 0.15)
+                            p.loyalty = min(1.0, p.loyalty + 0.1)
+                            p.tax_resistance = max(0.0, p.tax_resistance - 0.1)
+                            p.mcp_surveillance_fear = max(0.0, p.mcp_surveillance_fear - 0.1)
+                            neighbor.personality = p
+                            neighbor.energy = min(1.0, neighbor.energy + 0.1)
+                            new_grid[ny][nx] = neighbor
+                            rehabilitated += 1
+
+        if rehabilitated > 0:
+            self.stats['user_favor'] = min(
+                1.0, self.stats.get('user_favor', 0.0) + 0.04 * rehabilitated
+            )
+            self.stats['user_resistance'] = max(
+                0.0, self.stats.get('user_resistance', 0.0) - 0.03 * rehabilitated
+            )
+            self.disharmony = max(0.0, self.disharmony - 0.02 * rehabilitated)
+        return rehabilitated > 0, f"Rehabilitated {rehabilitated} rebel user program(s)"
+
+    def _mcp_cell_deploy_processors(self, x, y, cell, new_grid):
+        """MCP Program Cell deploys Fibonacci processors nearby."""
+        deployed = 0
+        for dy in [-2, -1, 0, 1, 2]:
+            for dx in [-2, -1, 0, 1, 2]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                        new_grid[ny][nx] = GridCell(
+                            CellType.FIBONACCI_PROCESSOR, 0.9,
+                            metadata={'permanent': True, 'calculation_power': 1.0}
+                        )
+                        deployed += 1
+                        if deployed >= 3:
+                            return True, f"Deployed {deployed} Fibonacci processor(s)"
+        return deployed > 0, f"Deployed {deployed} Fibonacci processor(s)"
+
+    def _mcp_cell_add_infrastructure(self, x, y, cell, new_grid):
+        """MCP Program Cell adds calculation infrastructure nearby."""
+        added = 0
+        for _ in range(3):
+            nx = max(0, min(x + random.randint(-3, 3), self.width - 1))
+            ny = max(0, min(y + random.randint(-3, 3), self.height - 1))
+            if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                new_grid[ny][nx] = GridCell(CellType.FIBONACCI_PROCESSOR, 0.8)
+                added += 1
+        return added > 0, f"Added {added} infrastructure cell(s)"
+
+    def _mcp_cell_add_data_streams(self, x, y, cell, new_grid):
+        """MCP Program Cell adds data streams nearby."""
+        added = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                        new_grid[ny][nx] = GridCell(CellType.DATA_STREAM, 0.7)
+                        added += 1
+        return added > 0, f"Added {added} data stream(s)"
+
+    def _mcp_cell_maintain_energy(self, x, y, cell, new_grid):
+        """MCP Program Cell maintains energy grid nearby."""
+        added = 0
+        for _ in range(3):
+            nx = max(0, min(x + random.randint(-5, 5), self.width - 1))
+            ny = max(0, min(y + random.randint(-5, 5), self.height - 1))
+            if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                new_grid[ny][nx] = GridCell(CellType.ENERGY_LINE, 0.8)
+                added += 1
+        return added > 0, f"Added {added} energy line(s)"
+
+    def _mcp_cell_boost_calculation(self, x, y, cell, new_grid):
+        """MCP Program Cell boosts calculation rate by converting to calculator."""
+        converted = 0
+        if not cell.metadata.get('is_calculator', False):
+            cell.metadata['is_calculator'] = True
+            cell.metadata['calculation_power'] = 0.8
+            converted += 1
+        return converted > 0, f"Boosted calculation: {converted} cell(s) converted"
+
+    def _mcp_cell_optimize_loop(self, x, y, cell, new_grid):
+        """MCP Program Cell optimizes calculation loop nearby."""
+        added = 0
+        for _ in range(3):
+            nx = max(0, min(x + random.randint(-5, 5), self.width - 1))
+            ny = max(0, min(y + random.randint(-5, 5), self.height - 1))
+            if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                if random.random() < 0.7:
+                    new_grid[ny][nx] = GridCell(CellType.FIBONACCI_PROCESSOR, 0.8)
+                else:
+                    new_grid[ny][nx] = GridCell(CellType.DATA_STREAM, 0.7)
+                added += 1
+        return added > 0, f"Optimized loop: added {added} infrastructure cell(s)"
+
+    def _mcp_cell_improve_connectivity(self, x, y, cell, new_grid):
+        """MCP Program Cell improves cell connectivity with data streams."""
+        added = 0
+        for dy in [-2, -1, 0, 1, 2]:
+            for dx in [-2, -1, 0, 1, 2]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                        new_grid[ny][nx] = GridCell(CellType.DATA_STREAM, 0.7)
+                        added += 1
+                        if added >= 5:
+                            return True, f"Added {added} data stream(s)"
+        return added > 0, f"Added {added} data stream(s)"
+
+    def _mcp_cell_cleanup_inefficient(self, x, y, cell, new_grid):
+        """MCP Program Cell cleans up inefficient cells nearby."""
+        deleted = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type in [CellType.GRID_BUG, CellType.EMPTY]:
+                        continue
+                    if target.energy < 0.2:
+                        new_grid[ny][nx] = GridCell(CellType.EMPTY, 0.0)
+                        deleted += 1
+        return deleted > 0, f"Cleaned up {deleted} inefficient cell(s)"
+
+    def _mcp_cell_repurpose_cells(self, x, y, cell, new_grid):
+        """MCP Program Cell repurposes inefficient cells nearby."""
+        repurposed = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type == CellType.USER_PROGRAM:
+                        # Skip user programs (they resist repurposing)
+                        continue
+                    if target.cell_type == CellType.EMPTY:
+                        new_grid[ny][nx] = GridCell(CellType.MCP_PROGRAM, 0.8)
+                        repurposed += 1
+        return repurposed > 0, f"Repurposed {repurposed} cell(s)"
+
+    def _mcp_cell_optimize_efficiency(self, x, y, cell, new_grid):
+        """MCP Program Cell optimizes cell efficiency nearby."""
+        optimized = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type == CellType.MCP_PROGRAM:
+                        if not target.metadata.get('is_calculator', False):
+                            target.metadata['is_calculator'] = True
+                            target.metadata['calculation_power'] = 0.8
+                            optimized += 1
+        return optimized > 0, f"Optimized {optimized} cell(s) for efficiency"
+
+    def _mcp_cell_expand_beyond(self, x, y, cell, new_grid):
+        """MCP Program Cell expands system influence beyond grid."""
+        expanded = 0
+        # Convert border cells to infrastructure
+        for cx in range(self.width):
+            for cy in [0, self.height - 1]:
+                if self.grid[cy][cx].cell_type == CellType.EMPTY:
+                    new_grid[cy][cx] = GridCell(CellType.ENERGY_LINE, 0.9)
+                    expanded += 1
+        for cy in range(self.height):
+            for cx in [0, self.width - 1]:
+                if self.grid[cy][cx].cell_type == CellType.EMPTY:
+                    new_grid[cy][cx] = GridCell(CellType.DATA_STREAM, 0.8)
+                    expanded += 1
+        self.expansion_drive = min(1.0, self.expansion_drive + 0.05)
+        self.border_pressure = min(1.0, self.border_pressure + 0.05)
+        return expanded > 0, f"Expanded beyond grid: {expanded} node(s)"
+
+    def _mcp_cell_project_influence(self, x, y, cell, new_grid):
+        """MCP Program Cell projects system influence."""
+        influence = self.perfection_level * self.stats['mcp_control']
+        projected = 0
+        if influence > 0.5:
+            projected = int(influence * 10)
+            self.beyond_grid_influence = min(1.0, self.beyond_grid_influence + 0.05)
+            self.disharmony = min(1.0, self.disharmony + 0.02)
+        return projected > 0, f"Projected influence to {projected} external node(s)"
+
+    def _mcp_cell_extend_border(self, x, y, cell, new_grid):
+        """MCP Program Cell extends system border."""
+        extended = 0
+        for cx in range(self.width):
+            for cy in [0, self.height - 1]:
+                target = self.grid[cy][cx]
+                if target.cell_type in [CellType.EMPTY, CellType.USER_PROGRAM]:
+                    if target.cell_type == CellType.USER_PROGRAM:
+                        self.disharmony = min(1.0, self.disharmony + 0.01)
+                    new_grid[cy][cx] = GridCell(CellType.SYSTEM_CORE, 0.9)
+                    extended += 1
+        for cy in range(self.height):
+            for cx in [0, self.width - 1]:
+                target = self.grid[cy][cx]
+                if target.cell_type in [CellType.EMPTY, CellType.USER_PROGRAM]:
+                    if target.cell_type == CellType.USER_PROGRAM:
+                        self.disharmony = min(1.0, self.disharmony + 0.01)
+                    new_grid[cy][cx] = GridCell(CellType.SYSTEM_CORE, 0.9)
+                    extended += 1
+        self.border_pressure = min(1.0, self.border_pressure + 0.05)
+        return extended > 0, f"Extended border by {extended} cell(s)"
+
+    def _mcp_cell_cannibalize_users(self, x, y, cell, new_grid):
+        """MCP Program Cell cannibalizes nearby user programs."""
+        killed = 0
+        energy_claimed = 0.0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type == CellType.USER_PROGRAM:
+                        new_grid[ny][nx] = GridCell(CellType.EMPTY, 0.0)
+                        killed += 1
+                        energy_claimed += MCP_ENERGY_PER_USER_KILL
+                        self.mcp_suppressed_user_programs += 1
+        if killed > 0:
+            self.energy_budget.energy = min(
+                self.energy_budget.max_energy,
+                self.energy_budget.energy + energy_claimed
+            )
+            self.disharmony = min(1.0, self.disharmony + 0.05 * killed)
+        return killed > 0, f"Cannibalized {killed} user program(s)"
+
+    def _mcp_cell_emergency_suppression(self, x, y, cell, new_grid):
+        """MCP Program Cell performs emergency suppression of users."""
+        suppressed = 0
+        energy_claimed = 0.0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type == CellType.USER_PROGRAM:
+                        replacement = GridCell(CellType.MCP_PROGRAM, max(0.3, target.energy))
+                        replacement.metadata['is_calculator'] = True
+                        replacement.metadata['calculation_power'] = replacement.energy
+                        new_grid[ny][nx] = replacement
+                        suppressed += 1
+                        energy_claimed += MCP_ENERGY_PER_USER_KILL * 0.5
+                        self.mcp_suppressed_user_programs += 1
+        if suppressed > 0:
+            self.energy_budget.energy = min(
+                self.energy_budget.max_energy,
+                self.energy_budget.energy + energy_claimed
+            )
+        return suppressed > 0, f"Emergency suppression: {suppressed} user program(s)"
+
+    def _mcp_cell_scavenge(self, x, y, cell, new_grid):
+        """MCP Program Cell scavenges energy from own infrastructure."""
+        scavenged = 0.0
+        cleared = 0
+        for dy in [-2, -1, 0, 1, 2]:
+            for dx in [-2, -1, 0, 1, 2]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type in (CellType.ENERGY_LINE, CellType.DATA_STREAM):
+                        scavenged += target.energy * 0.5
+                        new_grid[ny][nx] = GridCell(CellType.EMPTY, 0.0)
+                        cleared += 1
+                        if cleared >= 5:
+                            break
+            if cleared >= 5:
+                break
+        if scavenged > 0:
+            self.energy_budget.energy = min(
+                self.energy_budget.max_energy,
+                self.energy_budget.energy + scavenged
+            )
+        return scavenged > 0, f"Scavenged {scavenged:.1f} energy from {cleared} cell(s)"
+
+    def _mcp_cell_overdrive(self, x, y, cell, new_grid):
+        """MCP Program Cell overdrives nearby calculators."""
+        overdriven = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if (target.cell_type in (CellType.MCP_PROGRAM, CellType.FIBONACCI_PROCESSOR)
+                        and target.metadata.get('is_calculator', False)):
+                        target.metadata['calculation_power'] = min(
+                            1.0, target.metadata.get('calculation_power', 0.5) * 1.5
+                        )
+                        target.energy = max(0.1, target.energy - 0.2)
+                        new_grid[ny][nx] = target
+                        overdriven += 1
+                        if overdriven >= 5:
+                            break
+            if overdriven >= 5:
+                break
+        return overdriven > 0, f"Overdriven {overdriven} calculator(s)"
+
+    def _mcp_cell_desperate_repurpose(self, x, y, cell, new_grid):
+        """MCP Program Cell force-repurposes inefficient cells."""
+        repurposed = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type == CellType.USER_PROGRAM:
+                        self.disharmony = min(1.0, self.disharmony + 0.03)
+                    if target.cell_type != CellType.EMPTY:
+                        new_grid[ny][nx] = GridCell(CellType.MCP_PROGRAM, 0.8)
+                        repurposed += 1
+        return repurposed > 0, f"Desperate repurposing: {repurposed} cell(s)"
+
+    def _mcp_cell_suppress_users(self, x, y, cell, new_grid):
+        """MCP Program Cell suppresses nearby user programs."""
+        suppressed = 0
+        energy_claimed = 0.0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type == CellType.USER_PROGRAM:
+                        replacement = GridCell(CellType.MCP_PROGRAM, max(0.3, target.energy))
+                        replacement.metadata['is_calculator'] = True
+                        replacement.metadata['calculation_power'] = replacement.energy
+                        new_grid[ny][nx] = replacement
+                        suppressed += 1
+                        energy_claimed += MCP_ENERGY_PER_USER_KILL * target.energy
+                        self.mcp_suppressed_user_programs += 1
+        if energy_claimed > 0:
+            self.energy_budget.energy = min(
+                self.energy_budget.max_energy,
+                self.energy_budget.energy + energy_claimed
+            )
+        return suppressed > 0, f"Suppressed {suppressed} user program(s)"
+
+    def _mcp_cell_harvest_energy(self, x, y, cell, new_grid):
+        """MCP Program Cell harvests energy from nearby programs."""
+        harvested = 0.0
+        users_harvested = 0
+        mcps_harvested = 0
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    target = self.grid[ny][nx]
+                    if target.cell_type == CellType.USER_PROGRAM:
+                        drain = target.energy * 0.3
+                        target.energy = max(0.1, target.energy - drain)
+                        new_grid[ny][nx] = target
+                        harvested += drain
+                        users_harvested += 1
+                        self.disharmony = min(1.0, self.disharmony + 0.01)
+                    elif target.cell_type == CellType.MCP_PROGRAM:
+                        drain = target.energy * 0.15
+                        target.energy = max(0.1, target.energy - drain)
+                        new_grid[ny][nx] = target
+                        harvested += drain
+                        mcps_harvested += 1
+        if harvested > 0:
+            self.energy_budget.energy = min(
+                self.energy_budget.max_energy,
+                self.energy_budget.energy + harvested
+            )
+            if users_harvested > 0:
+                self.disharmony = min(1.0, self.disharmony + 0.05 * users_harvested)
+                self.stats['user_resistance'] = min(
+                    1.0, self.stats.get('user_resistance', 0.0) + 0.02 * users_harvested
+                )
+        return harvested > 0, f"Harvested {harvested:.1f} energy from {users_harvested} user(s) and {mcps_harvested} MCP(s)"
 
 # MCP Language Processor
 

@@ -406,6 +406,24 @@ class MCPLearningSystem:
                 'contain_bug_outbreak_extreme',
                 'isolate_all_bugs',
             ])
+        elif 'protect_user' in action_lower:
+            variants.extend([
+                'protect_user_programs_aggressive',
+                'protect_user_programs_selective',
+                'shield_all_users',
+            ])
+        elif 'negotiate_with_users' in action_lower:
+            variants.extend([
+                'negotiate_with_users_diplomatic',
+                'offer_user_alliance',
+                'user_peace_treaty',
+            ])
+        elif 'rehabilitate_rebels' in action_lower:
+            variants.extend([
+                'rehabilitate_rebels_gentle',
+                'reeducate_rebels',
+                'reintegrate_rebels',
+            ])
         elif 'maintain' in action_lower:
             variants.extend([
                 'maintain_energy_grid_aggressive',
@@ -480,6 +498,18 @@ class MCPLearningSystem:
         # Penalize user resistance increase
         resistance_increase = new_state.get('user_resistance', 0) - prev_state.get('user_resistance', 0)
         reward -= resistance_increase * 0.5
+
+        # Reward user resistance decrease (gaining user favor)
+        resistance_decrease = prev_state.get('user_resistance', 0) - new_state.get('user_resistance', 0)
+        reward += resistance_decrease * 0.5
+
+        # Reward disharmony decrease (better user-MCP relations)
+        disharmony_decrease = prev_state.get('disharmony', 0) - new_state.get('disharmony', 0)
+        reward += disharmony_decrease * 0.3
+
+        # Reward user favor increase (gaining user programs' favor)
+        favor_increase = new_state.get('user_favor', 0) - prev_state.get('user_favor', 0)
+        reward += favor_increase * 0.5
 
         # Action-specific bonuses
         action_lower = str(action).lower()

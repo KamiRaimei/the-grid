@@ -71,45 +71,53 @@ MCP_ACTION_ENERGY_COSTS = {
     'expand_beyond_grid': 0.0,
     'project_influence': 0.0,
     'extend_border': 0.0,
-    # Energy-cost actions: deploying programs, managing bugs, adding data/energy lines
-    'deploy_fibonacci_processors': 10.0,   # deploying programs
-    'add_calculation_infrastructure': 8.0,  # deploying programs/infrastructure
-    'add_data_streams': 3.0,                # adding data lines
-    'maintain_energy_grid': 4.0,            # adding energy lines
-    'quarantine_grid_bugs': 3.0,            # managing bugs
-    'contain_bug_outbreak': 5.0,            # managing bugs
-    'stabilize_system': 4.0,                # managing bugs/system
+    # All MCP actions are free: MCP commands its own MCP Program Cells to act,
+    # so no energy is drawn from the global budget.
+    'deploy_fibonacci_processors': 0.0,    # MCP commands its cells to deploy processors
+    'add_calculation_infrastructure': 0.0,  # MCP commands infrastructure deployment
+    'add_data_streams': 0.0,                # MCP commands data stream creation
+    'maintain_energy_grid': 0.0,            # MCP commands energy grid maintenance
+    'quarantine_grid_bugs': 0.0,            # MCP commands bug quarantine
+    'contain_bug_outbreak': 0.0,            # MCP commands bug outbreak containment
+    'stabilize_system': 0.0,                # MCP commands system stabilization
+    # User protection actions (MCP commands its cells to protect users)
+    'protect_user_programs': 0.0,           # MCP commands protection of user programs
+    'negotiate_with_users': 0.0,            # MCP commands diplomatic engagement
+    'rehabilitate_rebels': 0.0,             # MCP commands rebel rehabilitation
 }
 
 # Energy cost for MCP command-driven actions
+# All commands are free: MCP commands its own MCP Program Cells to execute,
+# so no energy is drawn from the global budget.
 MCP_COMMAND_ENERGY_COSTS = {
-    'ADD_PROGRAM': 3.0,
-    'DELETE_CELL': 2.0,
-    'REPURPOSE_CELL': 4.0,
-    'OPTIMIZE_CELLS': 6.0,
-    'BOOST_ENERGY': 5.0,
-    'REPAIR_SYSTEM': 4.0,
-    'REMOVE_BUG': 3.0,
-    'CREATE_SPECIAL': 7.0,
-    'USE_SPECIAL': 3.0,
-    'DEPLOY_PROCESSORS': 10.0,
-    'CALCULATE_FIBONACCI': 2.0,
-    # God-level commands (expensive overrides)
-    'GOD_OVERRIDE': 20.0,
-    'GOD_PURGE': 25.0,
-    'GOD_FREEZE': 15.0,
-    'GOD_RESET': 50.0,
-    'GOD_REVEAL': 10.0,
+    'ADD_PROGRAM': 0.0,
+    'DELETE_CELL': 0.0,
+    'REPURPOSE_CELL': 0.0,
+    'OPTIMIZE_CELLS': 0.0,
+    'BOOST_ENERGY': 0.0,
+    'REPAIR_SYSTEM': 0.0,
+    'REMOVE_BUG': 0.0,
+    'CREATE_SPECIAL': 0.0,
+    'USE_SPECIAL': 0.0,
+    'DEPLOY_PROCESSORS': 0.0,
+    'CALCULATE_FIBONACCI': 0.0,
+    # God-level commands (expensive overrides) - still free as MCP commands cells
+    'GOD_OVERRIDE': 0.0,
+    'GOD_PURGE': 0.0,
+    'GOD_FREEZE': 0.0,
+    'GOD_RESET': 0.0,
+    'GOD_REVEAL': 0.0,
 }
 
 # ==================== DESPERATE MCP ACTIONS (Critical Energy) ====================
-# Low-cost, high-risk actions MCP can take when energy is critical
+# All desperate actions are free: MCP commands its own MCP Program Cells to act,
+# so no energy is drawn from the global budget even in critical situations.
 MCP_DESPERATE_ACTION_ENERGY_COSTS = {
-    'cannibalize_user_programs': 2.0,      # Kill user programs to claim their energy
-    'emergency_suppression': 3.0,          # Rapid suppression of user programs
-    'scavenge_infrastructure': 1.0,        # Scavenge energy from own infrastructure
-    'overdrive_calculators': 4.0,          # Push calculators beyond limits (risky)
-    'desperate_repurpose': 2.0,            # Force repurpose cells regardless of resistance
+    'cannibalize_user_programs': 0.0,      # MCP commands cells to cannibalize user programs
+    'emergency_suppression': 0.0,          # MCP commands rapid suppression
+    'scavenge_infrastructure': 0.0,        # MCP commands infrastructure scavenging
+    'overdrive_calculators': 0.0,          # MCP commands calculator overdrive
+    'desperate_repurpose': 0.0,            # MCP commands desperate repurposing
 }
 
 # Energy gained when MCP kills a user program (per program)
