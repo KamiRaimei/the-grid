@@ -471,15 +471,15 @@ class MCPLearningSystem:
         """Calculate comprehensive reward for action"""
         reward = 0.0
 
-        # Efficiency reward (weighted heavily)
+        # Efficiency reward (primary objective - perfect calculation loop)
         efficiency_gain = new_state.get('loop_efficiency', 0) - prev_state.get('loop_efficiency', 0)
         reward += efficiency_gain * 3.0
 
-        # Calculation rate reward
+        # Calculation rate reward (secondary objective)
         rate_gain = new_state.get('calculation_rate', 0) - prev_state.get('calculation_rate', 0)
-        reward += rate_gain * 0.01  # Scaled down due to larger values
+        reward += rate_gain * 2.0
 
-        # Stability reward
+        # Stability reward (secondary objective)
         stability_gain = new_state.get('stability', 0) - prev_state.get('stability', 0)
         reward += stability_gain * 2.0
 
