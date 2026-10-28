@@ -237,20 +237,34 @@ class TRONGrid:
         ))
         # ISO-like resistance: user programs resist more aggressively under high MCP control
         resistance_amplifier = 1.0 + self.disharmony * 0.5
-        multiplication_chance = min(
-            0.20, 0.02 + 0.08 * mcp_control_pressure * resistance_amplifier + 0.06 * efficiency_pressure
-        )
         revolt_chance = min(
             0.40, 0.25 * mcp_control_pressure * resistance_amplifier + 0.08 * efficiency_pressure
         )
         reserved_user_cells = set()
         spawned_users = 0
 
+        # --- User program replication requests (MCP must approve energy) ---
+        # User programs that want to replicate submit a request; MCP decides
+        # based on energy availability and its drives. Replication is NOT automatic.
+        user_replication_requests = []  # (x, y, cell, personality, empty_target)
+        energy_ratio = self.energy_budget.energy_ratio()
+
         for y in range(self.height):
             for x in range(self.width):
                 cell = self.grid[y][x]
                 if cell.cell_type == CellType.USER_PROGRAM:
                     personality = cell.personality or UserProgramPersonality()
+
+                    # --- FIBONACCI CALCULATION STRESS ---
+                    # User programs that act as calculators pay an energy stress cost
+                    if cell.metadata.get('is_calculator', False):
+                        fib_stress = 0.05  # Energy drained per tick for calculation work
+                        cell.energy = max(0.1, cell.energy - fib_stress)
+                        # Calculation stress increases rebellion (user programs resent the work)
+                        personality.rebellion = min(1.0, personality.rebellion + 0.01)
+                        personality.cooperation = max(0.0, personality.cooperation - 0.005)
+                        cell.personality = personality
+
                     # Revolt chance modulated by personality rebellion + MCP pressure
                     personal_revolt = personality.rebellion * 0.3
                     if random.random() < revolt_chance + personal_revolt:
@@ -287,7 +301,20 @@ class TRONGrid:
                             self.disharmony = min(1.0, self.disharmony + 0.02)
                             continue
 
-                    if random.random() < multiplication_chance:
+                    # --- REPLICATION REQUEST: User program asks MCP to approve replication ---
+                    # User programs desire to multiply under oppression/pressure, but MCP must approve
+                    # and spend energy from the global budget. Denied requests increase stress/rebellion.
+                    replication_desire = (
+                        0.15 * personality.rebellion +
+                        0.1 * mcp_control_pressure +
+                        0.08 * efficiency_pressure +
+                        0.05 * (1.0 - personality.cooperation)
+                    )
+                    # Energy scarcity makes user programs more desperate to replicate (survival)
+                    if energy_ratio < 0.5:
+                        replication_desire += 0.1 * (0.5 - energy_ratio)
+
+                    if random.random() < replication_desire:
                         empty_neighbors = [
                             (x + dx, y + dy)
                             for dx, dy in self.neighbor_offsets_8
@@ -297,13 +324,80 @@ class TRONGrid:
                         ]
                         if empty_neighbors:
                             tx, ty = random.choice(empty_neighbors)
-                            new_grid[ty][tx] = GridCell(
-                                CellType.USER_PROGRAM, min(0.8, cell.energy * 0.8),
-                                personality=personality.mutate(),
-                            )
-                            reserved_user_cells.add((tx, ty))
-                            self.user_program_multiplications += 1
-                            spawned_users += 1
+                            user_replication_requests.append({
+                                'x': x, 'y': y,
+                                'tx': tx, 'ty': ty,
+                                'cell': cell,
+                                'personality': personality,
+                            })
+
+        # --- MCP decides on user replication requests ---
+        # MCP reviews each request and approves/denies based on energy and its drives.
+        # Approved replications consume energy from the global budget.
+        mcp_cooperation = self.stats.get('mcp_control', 0.5)
+        mcp_efficiency_focus = self.stats.get('loop_efficiency', 0.5)
+        mcp_user_tolerance = 0.3  # MCP's baseline tolerance for user programs
+
+        for req in user_replication_requests:
+            x, y, tx, ty = req['x'], req['y'], req['tx'], req['ty']
+            personality = req['personality']
+            cell = req['cell']
+
+            # MCP decision: approve replication if energy available and MCP sees benefit
+            energy_cost = self.energy_budget.config.consumption_per_user_replication
+            can_afford = self.energy_budget.energy >= energy_cost
+
+            # MCP weighs: user tolerance, efficiency focus, control drive, energy availability
+            mcp_approve_chance = (
+                0.3 * mcp_user_tolerance +
+                0.3 * mcp_efficiency_focus +
+                0.2 * (1.0 - personality.rebellion) +  # Less likely to approve rebellious users
+                0.2 * can_afford  # Energy availability is a hard factor
+            )
+            # Under energy scarcity, MCP is less likely to approve user replication
+            if energy_ratio < 0.3:
+                mcp_approve_chance *= 0.3
+            elif energy_ratio < 0.5:
+                mcp_approve_chance *= 0.6
+
+            if random.random() < mcp_approve_chance and can_afford:
+                # MCP APPROVES: deduct energy and replicate
+                # Parent cell stays in place; child is created at target
+                self.energy_budget.consume(energy_cost, reason=f"user_replication_approved_at_{x}_{y}")
+                new_grid[y][x] = GridCell(
+                    CellType.USER_PROGRAM,
+                    max(0.2, cell.energy - 0.05),  # Parent pays small energy cost
+                    cell.age + 1,
+                    personality=personality,
+                )
+                new_grid[ty][tx] = GridCell(
+                    CellType.USER_PROGRAM,
+                    min(0.8, cell.energy * 0.8),
+                    personality=personality.mutate(),
+                )
+                reserved_user_cells.add((tx, ty))
+                reserved_user_cells.add((x, y))
+                self.user_program_multiplications += 1
+                spawned_users += 1
+                # Approved replication slightly reduces rebellion (user feels heard)
+                personality.rebellion = max(0.0, personality.rebellion - 0.05)
+                cell.personality = personality
+                self.add_log(f"MCP approved user replication at ({tx},{ty}) - energy spent: {energy_cost}")
+            else:
+                # MCP DENIES: user program gets stressed, rebellion increases
+                personality.rebellion = min(1.0, personality.rebellion + 0.1)
+                personality.tax_resistance = min(1.0, personality.tax_resistance + 0.05)
+                cell.energy = max(0.1, cell.energy - 0.05)  # Stress drains energy
+                cell.personality = personality
+                # User program stays in place (no replication)
+                new_grid[y][x] = GridCell(
+                    CellType.USER_PROGRAM,
+                    cell.energy,
+                    cell.age + 1,
+                    personality=personality,
+                )
+                reserved_user_cells.add((x, y))
+                self.add_log(f"MCP denied user replication at ({x},{y}) - user stress increased")
 
         # Track user interference
         user_population = sum(
@@ -491,26 +585,6 @@ class TRONGrid:
                                 cell.energy = max(0.1, cell.energy - 0.1)
                                 self.disharmony = min(1.0, self.disharmony + 0.02)
 
-                    # --- Multiplication: User programs multiply under oppression ---
-                    if random.random() < multiplication_chance:
-                        empty_neighbors = [
-                            (x + dx, y + dy)
-                            for dx, dy in self.neighbor_offsets_8
-                            if 0 <= x + dx < self.width and 0 <= y + dy < self.height
-                            and self.grid[y + dy][x + dx].cell_type == CellType.EMPTY
-                            and (x + dx, y + dy) not in reserved_user_cells
-                        ]
-                        if empty_neighbors:
-                            tx, ty = random.choice(empty_neighbors)
-                            new_grid[ty][tx] = GridCell(
-                                CellType.USER_PROGRAM,
-                                min(0.8, cell.energy * 0.8),
-                                personality=personality.mutate(),
-                            )
-                            reserved_user_cells.add((tx, ty))
-                            self.user_program_multiplications += 1
-                            spawned_users += 1
-
                     # --- Movement: Resistant users move randomly (avoid MCP control) ---
                     if random.random() < self.stats['user_resistance'] * 0.3 * (1.0 - personality.cooperation):
                         dx, dy = random.choice([(-1,0), (1,0), (0,-1), (0,1)])
@@ -602,7 +676,12 @@ class TRONGrid:
                                     self.disharmony = max(0.0, self.disharmony - 0.01)
 
                     # MCP programs replicate into empty adjacent cells to expand control
-                    if random.random() < 0.25:
+                    # MCP must spend energy from the global budget to approve replication.
+                    energy_ratio = self.energy_budget.energy_ratio()
+                    mcp_replication_cost = self.energy_budget.config.consumption_per_mcp_replication
+                    can_afford_replication = self.energy_budget.energy >= mcp_replication_cost
+
+                    if random.random() < 0.25 and can_afford_replication:
                         empty_neighbors = [
                             (x + dx, y + dy)
                             for dx, dy in self.neighbor_offsets_8
@@ -611,6 +690,8 @@ class TRONGrid:
                         ]
                         if empty_neighbors:
                             tx, ty = random.choice(empty_neighbors)
+                            # MCP spends energy to replicate
+                            self.energy_budget.consume(mcp_replication_cost, reason=f"mcp_replication_at_{x}_{y}")
                             new_grid[ty][tx] = GridCell(
                                 CellType.MCP_PROGRAM,
                                 min(1.0, cell.energy * 0.9 + 0.1),
@@ -619,6 +700,17 @@ class TRONGrid:
                             )
                             new_grid[ty][tx].metadata['is_calculator'] = True
                             new_grid[ty][tx].metadata['calculation_power'] = new_grid[ty][tx].energy
+                            # Parent stays in place
+                            new_grid[y][x] = GridCell(
+                                cell.cell_type,
+                                max(0.3, cell.energy - 0.01),
+                                cell.age + 1,
+                                metadata=cell.metadata.copy()
+                            )
+                            continue
+                    elif random.random() < 0.25 and not can_afford_replication:
+                        # MCP wants to replicate but cannot afford energy - stress
+                        self.add_log(f"MCP cell ({x},{y}) replication denied - insufficient energy")
 
                     # MCP programs optimize for loop efficiency
                     if random.random() < 0.4:
@@ -1841,13 +1933,19 @@ class TRONGrid:
         return rehabilitated > 0, f"Rehabilitated {rehabilitated} rebel user program(s)"
 
     def _mcp_cell_deploy_processors(self, x, y, cell, new_grid):
-        """MCP Program Cell deploys Fibonacci processors nearby."""
+        """MCP Program Cell deploys Fibonacci processors nearby.
+        MCP must spend energy from the global budget per processor deployed."""
         deployed = 0
+        cost_per_processor = self.energy_budget.config.consumption_per_mcp_replication
         for dy in [-2, -1, 0, 1, 2]:
             for dx in [-2, -1, 0, 1, 2]:
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < self.width and 0 <= ny < self.height:
                     if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                        # Check energy affordability before deploying
+                        if self.energy_budget.energy < cost_per_processor:
+                            return deployed > 0, f"Deployed {deployed} processor(s) (energy depleted)"
+                        self.energy_budget.consume(cost_per_processor, reason=f"deploy_processor_at_{nx}_{ny}")
                         new_grid[ny][nx] = GridCell(
                             CellType.FIBONACCI_PROCESSOR, 0.9,
                             metadata={'permanent': True, 'calculation_power': 1.0}
@@ -1858,19 +1956,26 @@ class TRONGrid:
         return deployed > 0, f"Deployed {deployed} Fibonacci processor(s)"
 
     def _mcp_cell_add_infrastructure(self, x, y, cell, new_grid):
-        """MCP Program Cell adds calculation infrastructure nearby."""
+        """MCP Program Cell adds calculation infrastructure nearby.
+        MCP must spend energy from the global budget per infrastructure cell."""
         added = 0
+        cost_per_cell = self.energy_budget.config.consumption_per_mcp_replication
         for _ in range(3):
             nx = max(0, min(x + random.randint(-3, 3), self.width - 1))
             ny = max(0, min(y + random.randint(-3, 3), self.height - 1))
             if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                if self.energy_budget.energy < cost_per_cell:
+                    return added > 0, f"Added {added} infrastructure cell(s) (energy depleted)"
+                self.energy_budget.consume(cost_per_cell, reason=f"add_infrastructure_at_{nx}_{ny}")
                 new_grid[ny][nx] = GridCell(CellType.FIBONACCI_PROCESSOR, 0.8)
                 added += 1
         return added > 0, f"Added {added} infrastructure cell(s)"
 
     def _mcp_cell_add_data_streams(self, x, y, cell, new_grid):
-        """MCP Program Cell adds data streams nearby."""
+        """MCP Program Cell adds data streams nearby.
+        MCP must spend energy from the global budget per data stream."""
         added = 0
+        cost_per_stream = self.energy_budget.config.consumption_per_mcp_replication * 0.5
         for dy in [-1, 0, 1]:
             for dx in [-1, 0, 1]:
                 if dx == 0 and dy == 0:
@@ -1878,17 +1983,25 @@ class TRONGrid:
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < self.width and 0 <= ny < self.height:
                     if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                        if self.energy_budget.energy < cost_per_stream:
+                            return added > 0, f"Added {added} data stream(s) (energy depleted)"
+                        self.energy_budget.consume(cost_per_stream, reason=f"add_data_stream_at_{nx}_{ny}")
                         new_grid[ny][nx] = GridCell(CellType.DATA_STREAM, 0.7)
                         added += 1
         return added > 0, f"Added {added} data stream(s)"
 
     def _mcp_cell_maintain_energy(self, x, y, cell, new_grid):
-        """MCP Program Cell maintains energy grid nearby."""
+        """MCP Program Cell maintains energy grid nearby.
+        MCP must spend energy from the global budget per energy line."""
         added = 0
+        cost_per_line = self.energy_budget.config.consumption_per_mcp_replication * 0.5
         for _ in range(3):
             nx = max(0, min(x + random.randint(-5, 5), self.width - 1))
             ny = max(0, min(y + random.randint(-5, 5), self.height - 1))
             if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                if self.energy_budget.energy < cost_per_line:
+                    return added > 0, f"Added {added} energy line(s) (energy depleted)"
+                self.energy_budget.consume(cost_per_line, reason=f"add_energy_line_at_{nx}_{ny}")
                 new_grid[ny][nx] = GridCell(CellType.ENERGY_LINE, 0.8)
                 added += 1
         return added > 0, f"Added {added} energy line(s)"
@@ -1903,12 +2016,17 @@ class TRONGrid:
         return converted > 0, f"Boosted calculation: {converted} cell(s) converted"
 
     def _mcp_cell_optimize_loop(self, x, y, cell, new_grid):
-        """MCP Program Cell optimizes calculation loop nearby."""
+        """MCP Program Cell optimizes calculation loop nearby.
+        MCP must spend energy from the global budget per infrastructure cell added."""
         added = 0
+        cost_per_cell = self.energy_budget.config.consumption_per_mcp_replication * 0.5
         for _ in range(3):
             nx = max(0, min(x + random.randint(-5, 5), self.width - 1))
             ny = max(0, min(y + random.randint(-5, 5), self.height - 1))
             if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                if self.energy_budget.energy < cost_per_cell:
+                    return added > 0, f"Optimized loop: added {added} cell(s) (energy depleted)"
+                self.energy_budget.consume(cost_per_cell, reason=f"optimize_loop_at_{nx}_{ny}")
                 if random.random() < 0.7:
                     new_grid[ny][nx] = GridCell(CellType.FIBONACCI_PROCESSOR, 0.8)
                 else:
@@ -1917,13 +2035,18 @@ class TRONGrid:
         return added > 0, f"Optimized loop: added {added} infrastructure cell(s)"
 
     def _mcp_cell_improve_connectivity(self, x, y, cell, new_grid):
-        """MCP Program Cell improves cell connectivity with data streams."""
+        """MCP Program Cell improves cell connectivity with data streams.
+        MCP must spend energy from the global budget per data stream."""
         added = 0
+        cost_per_stream = self.energy_budget.config.consumption_per_mcp_replication * 0.5
         for dy in [-2, -1, 0, 1, 2]:
             for dx in [-2, -1, 0, 1, 2]:
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < self.width and 0 <= ny < self.height:
                     if self.grid[ny][nx].cell_type == CellType.EMPTY:
+                        if self.energy_budget.energy < cost_per_stream:
+                            return added > 0, f"Added {added} data stream(s) (energy depleted)"
+                        self.energy_budget.consume(cost_per_stream, reason=f"improve_connectivity_at_{nx}_{ny}")
                         new_grid[ny][nx] = GridCell(CellType.DATA_STREAM, 0.7)
                         added += 1
                         if added >= 5:
